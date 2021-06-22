@@ -7,6 +7,9 @@ library(dplyr)
 library(ggpubr)
 
 #load data
+
+#please copy Seurat v2.3.4 preprocessed datasets into working directory
+
 load("Lung_day00_Rhapsody.rda")
 load("Lung_SMARTSeq2.rda")
 
