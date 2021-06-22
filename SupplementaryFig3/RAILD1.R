@@ -1,3 +1,9 @@
+#re-analysis of 10X Chromium v2 data of murine lung of Tabula Muris data
+options(stringsAsFactors = FALSE)
+
+#please install Seurat v2.3.4. and rDBEC package before use (could be downloaded from this repository)
+suppressWarnings(suppressMessages(source("library_source_Seurat.R")))
+
 fnames = dir(pattern = "matrix_inflection_")
 tablelist = lapply(fnames, tableread_fast_sparse)
 
