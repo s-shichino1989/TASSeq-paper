@@ -1,6 +1,8 @@
 #re-analysis of murine Lewis Lung carcinoma TAS-Seq data
 options(stringsAsFactors = FALSE)
-suppressWarnings(suppressMessages(source("/datadrive/Rhapsody_analysis/Rscripts/library_source_Seurat.R")))
+
+#please install Seurat v2.3.4. and rDBEC package before use (could be downloaded from this repository)
+suppressWarnings(suppressMessages(source("library_source_Seurat.R")))
 
 tableread_fast_hashtag = function(x, sep="\t", header=TRUE){
   tmp = data.table::fread(x, header=header, sep=sep, quote="")
