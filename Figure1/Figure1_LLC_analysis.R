@@ -8,10 +8,18 @@ tableread_fast_hashtag = function(x, sep="\t", header=TRUE){
   return(tmp)
 }
 
+
+#Download data
+fileUrl <- "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE167nnn/GSE167192/suppl/GSE167192%5FProcessedData%5FFinal%5FMatrix%5FHashtag%2Etxt%2Egz"
+download.file(fileUrl, destfile = "./matrix_inflection_LLC.txt.gz", method = "wget")
+
 #load gene expression matrix
 tablelist = lapply("matrix_inflection_LLC.txt.gz", 
                    tableread_fast_sparse)
 names(tablelist)="LLC"
+
+#remove hashtag pre-annotation
+colnames(tablelist[[1]])=gsub(".*_", "", colnames(tablelist[[1]]))
 
 #load hashtag-expression matrix
 hashtag_data=lapply("Hashtag_top1M_LLCTag1.txt.gz", tableread_fast_hashtag)
