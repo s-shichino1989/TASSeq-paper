@@ -254,10 +254,11 @@ tmp1 = tmp %>% tidyr::spread(key = Var2, value=Freq)
 colnames(tmp1)[1]="Celltype"
 hoge = c("doublet", "not-detected")
 tmp1 = tmp1[,!colnames(tmp1) %in% hoge]
+rownames(tmp1)=tmp1[,1]
+tmp1 = tmp1[unique(mBC@meta.data$celltype),]
 
 tmp_cellcount = tmp1
 
-rownames(tmp1) = tmp1[,1]
 tmp1 = tmp1[,2:ncol(tmp1)]
 
 #cell composition analysis, calculate % of total
@@ -272,7 +273,7 @@ temp_labels <- mBC@meta.data %>%
 
 tmp2 = tmp_cellcount %>% tibble::rownames_to_column() %>%
   reshape2::melt(id.vars = 'rowname') %>% 
-  mutate(rowname = factor(rowname, levels = levels(mBC@meta.data$celltype)))
+  mutate(rowname = factor(rowname, levels = levels(as.factor(mBC@meta.data$celltype))))
 
 colnames(tmp2)[1:2]=c("Celltype", "Sample")
 
@@ -294,7 +295,7 @@ p_PercentOfTotal = tmp2 %>%
 
 ggsave(file = "composition.png", plot = p_PercentOfTotal, 
        device="png", units="in", dpi = 300,
-       width = 3.8, height = 3.7, limitsize=FALSE)
+       width = 4.2, height = 4.4, limitsize=FALSE)
 
 save.pigz(mBC, file="RAILD1_reanalysis.rda", n.cores=8)
 
