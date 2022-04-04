@@ -1,0 +1,2488 @@
+---
+title: "Seurat analysis report of BD Rhapsody TAS-Seq WTA data"
+date: "`r Sys.Date()`"
+author: "ImmunoGeneTeqs Inc."
+output:
+  rmdformats::readthedown:
+    highlight: kate
+    self_contained: true
+    thumbnails: false
+    lightbox: false
+    gallery: false
+    mathjax: false
+    toc_depth: 2  #type-of-column header specification 
+    md_extensions: -ascii_identifiers
+  minidown::mini_document:
+    results_folding: hide
+params:
+  result_dir_name: result_dir_name
+  threads: threads
+  DBEC_output: DBEC_output
+  DBEC_threads: DBEC_threads
+  min.ave: min.ave
+  min.diff: min.diff
+  species: species
+  downsampling: downsampling
+  SingleR: SingleR
+  SingleR_ref: SingleR_ref
+
+---
+
+```{r setup, echo=FALSE, cache=FALSE, message=FALSE, warning=FALSE}
+setwd("../")
+suppressWarnings(suppressMessages(source("./library_source_Seurat.R")))
+suppressMessages(library(knitr))
+suppressMessages(library(rmdformats))
+suppressMessages(library(stringr))
+suppressMessages(library(DT))
+suppressMessages(library(cluster))
+suppressMessages(library(parallelDist))
+suppressMessages(library(WGCNA))
+suppressMessages(library(flashClust))
+suppressMessages(library(SingleR))
+suppressMessages(library(ggsci))
+suppressMessages(library(qs))
+suppressMessages(library(cluster))
+suppressMessages(library(minidown))
+
+
+quiet <- function(x) { 
+  sink(tempfile()) 
+  on.exit(sink()) 
+  invisible(force(x)) 
+} 
+
+## Global options
+options(max.print="75")
+opts_chunk$set(echo=FALSE,
+	             cache=FALSE,
+               prompt=FALSE,
+               tidy=TRUE,
+               comment=NA,
+               message=FALSE,
+               warning=FALSE,
+               fig.align='center',
+               results.folding=NULL)
+opts_knit$set(width=50)
+
+result_dir_name = params$result_dir_name
+sample_name = result_dir_name
+threads = as.numeric(params$threads)
+DBEC_threads = as.numeric(params$DBEC_threads)
+species = params$species
+downsampling = as.logical(params$downsampling)
+Singler = as.logical(params$SingleR)
+SingleR_ref = params$SingleR_ref
+DBEC_output = as.logical(params$DBEC_output)
+min.ave = as.numeric(params$min.ave)
+min.diff = as.numeric(params$min.diff)
+
+```
+
+
+```{r analysis_dataLoad, echo=FALSE, cache=FALSE, message=FALSE}
+
+#create output folders
+setwd("../") #must set working directory. default is .Rmd-existing path.
+
+#make output directories
+dir.name = paste("./result/", result_dir_name, sep="")
+dir.name.1 = paste(dir.name, "/Seurat", sep="")
+if(!dir.exists(dir.name.1)){
+dir.create(dir.name.1)
+}
+dir.name.plot1 = paste(dir.name.1, "/Seurat_plots/", sep="")
+if(!dir.exists(dir.name.plot1)){
+dir.create(dir.name.plot1)
+}
+dir.name.matrix = paste(dir.name, "/matrix/", sep="")
+if(!dir.exists(dir.name.matrix)){
+dir.create(dir.name.matrix)
+}
+dir.name.plot = paste(dir.name, "/plots/", sep="")
+if(!dir.exists(dir.name.plot)){
+dir.create(dir.name.plot)
+}
+dir.name.table = paste(dir.name.1, "/Seurat_tables/", sep="")
+if(!dir.exists(dir.name.table)){
+dir.create(dir.name.table)
+}
+setwd(dir.name.matrix)
+
+#load demultiplexed tables and create merged Seurat object
+
+system("wget -L -O matrix_inflection_TASSeq.deep-1.txt.gz https://tus.box.com/shared/static/gft7tuo3nlyf01ce41uj5kjokkrmig9v.gz")
+system("wget -L -O matrix_inflection_TASSeq.deep-2.txt.gz
+https://tus.box.com/shared/static/gcqjlcksnr0bdppvvoa2ou5qars971sx.gz")
+system("wget -L -O matrix_inflection_TASSeq.deep-3.txt.gz
+https://tus.box.com/shared/static/m3n6lnouqjw7qcfjwv0aelpx5x2qihea.gz")
+
+fnames = dir(pattern = "matrix_inflection")
+tablelist = lapply(fnames, tableread_fast_sparse)
+num_of_data = length(tablelist)
+
+fnames = gsub(".txt.gz", "", fnames) # remove ".txt" from file names
+fnames = gsub("matrix_inflection_demulti_", "", fnames) 
+fnames = gsub("matrix_inflection_", "", fnames) 
+names(tablelist)=fnames
+
+#for (i in c(1:length(fnames))){
+#  colnames(tablelist[[i]])=paste(fnames[i], colnames(tablelist[[i]]), sep=".")
+#}
+
+#colnames(tablelist[[1]])=paste(fnames[1], colnames(tablelist[[1]]), sep=".")
+
+#colnames(tablelist[[2]])=paste(fnames[2], colnames(tablelist[[2]]), sep="_")
+
+#colnames(tablelist[[3]])=paste(fnames[3], colnames(tablelist[[3]]), sep="_")
+
+if(length(fnames)>1){
+if(!DBEC_output){
+if (packageVersion("Seurat") == "2.3.4"){
+  tablelist = lapply(tablelist, CreateSeuratObject, min.cells = 5, min.genes = 500)
+} else if (packageVersion("Seurat") >= "3.0"){
+  tablelist = lapply(tablelist, CreateSeuratObject, min.cells = 5, min.features = 500)
+}  
+
+}
+} else if(length(fnames)==1){
+if(!DBEC_output){
+  if (packageVersion("Seurat") == "2.3.4"){
+mBC = CreateSeuratObject(tablelist[[1]], min.cells=5, min.genes=500)
+} else if (packageVersion("Seurat") >= "3.0"){
+  mBC = CreateSeuratObject(tablelist[[1]], min.cells=5, min.features=500)
+}
+}
+}
+
+
+
+```
+
+---
+
+`r if(DBEC_output){"Perform DBEC correction (mRNA leak-derived backgroud subtraction of gene expression)"}`
+`r if(DBEC_output){paste("For DBEC correction, genes of which log2(x+1)-transformed maximum expression over 8 were selected, and biexponential transformation was performed by using FlowTrans package in ", version$version.string, ". Next, normal mixture components (model E) was detected by using mclust package in ",  version$version.string, ", average expression of each components was calculated, and genes of which the maximum average expression over ", min.ave, " were selected for background subtration. Then, if the components of which difference of the maximum average expression against maximal average expression under ", min.diff, " were detected, the expression value of the components set as 0 for background subtracion.", sep="")}`
+
+
+```{r analysis_DBEC, echo=FALSE, cache=FALSE, eval = DBEC_output}
+
+setwd("../") #must set working directory. default is .Rmd-existing path.
+message("Performing DBEC-correction... This may take some time.")
+
+ x=tablelist
+minimum.max.expr=8
+ min.event=100
+ modelnames="E"
+ iteration=1000
+ flooring=0
+ nthreads=DBEC_threads
+ sample.name=fnames
+ dir.name_DBEC=dir.name.plot
+           uncert.thre=1
+  seed = 42
+
+  if(class(x)!="list"){stop("x must be a list of read count sparse matrix file")}
+  nsamples=length(x)
+  if(nsamples == 0){stop("x must be contain at least one read count sparse matrix file")}
+  if(sum(names(x) != sample.name)!=0){stop("x must be named by sample IDs as sample.name vector")}
+
+  #ave_hvg=list()
+  median_read_depth=list()
+
+  for (i in 1:nsamples){
+    #calculate median read depth of each dataset
+    Nreads = Matrix::colSums(x[[i]], na.rm=TRUE)
+    median_read_depth[[i]]=stats::median(Nreads, na.rm = T)
+
+    folder_name = sprintf("DBEC_thresholds_%s", sample.name[i])
+    dir.name_DBEC1 = paste(dir.name_DBEC, folder_name, sep="")
+    if(file.exists(dir.name_DBEC1)==FALSE){dir.create(dir.name_DBEC1)}
+
+    tmp1 = qlcMatrix::rowMax(x[[i]])
+    tmp1 = as.vector(tmp1)
+    tmp2 = tmp1 >= 2^minimum.max.expr & apply(x[[i]], 1, function(z){sum(z>0)}) > min.event
+    tmp2 = x[[i]][tmp2,]
+
+    if (species == "hsa"){
+      mito.genes = grep(pattern = "^MT.", x = rownames(x = tmp2), value = TRUE)
+      ribo.genes = grep(pattern = "^RP[SL][[:digit:]]", x = rownames(x = tmp2), value = TRUE)
+      riboRNA.genes = grep(pattern = "^RNA[[:digit:]]", x = rownames(x = tmp2), value = TRUE)
+      mask_gene = c(mito.genes, ribo.genes, riboRNA.genes, c("ACTB", "B2M", "GAPDH"))
+    } else if (species == "mmu"){
+      mito.genes = grep(pattern = "^mt.", x = rownames(x = tmp2), value = TRUE)
+      ribo.genes = grep(pattern = "^Rp[sl][[:digit:]]", x = rownames(x = tmp2), value = TRUE)
+      ribo.genes1 = grep(pattern = "^Rp[l][[:digit:]]", x = rownames(x = tmp2), value = TRUE)
+      riboRNA.genes = c('Rn45s','Rn18s','Rn28s1','Rs5-8s1')
+      mask_gene = c(mito.genes, ribo.genes, ribo.genes1, riboRNA.genes, c("Actb", "B2m", "Gapdh"))
+    } else if (species == "rat"){
+      mito.genes = grep(pattern = "^Mt.", x = rownames(x = tmp2), value = TRUE)
+      ribo.genes = grep(pattern = "^Rp[sl][[:digit:]]", x = rownames(x = tmp2), value = TRUE)
+      ribo.genes1 = grep(pattern = "^Rp[l][[:digit:]]", x = rownames(x = tmp2), value = TRUE)
+      riboRNA.genes = c('Rn45s','Rn18s','Rn28s1','Rs5-8s1')
+      mask_gene = c(mito.genes, ribo.genes, ribo.genes1, riboRNA.genes, c("Actb", "B2m", "Gapdh"))
+    } else {stop("must specify valid species. Acceptable species are hsa or mmu or rat")}
+
+    if(length(min.ave)>1){
+      minimum_ave=min.ave[i]
+    } else {minimum_ave=min.ave}
+    if(length(min.diff)>1){
+      min_diff=min.diff[i]
+    } else {min_diff=min.diff}
+
+    tmp2 = tmp2[setdiff(rownames(tmp2), mask_gene),]
+    #calculate background thresholds
+    cl = parallelly::makeClusterPSOCK(workers=nthreads, autoStop = TRUE, useXDR=FALSE)
+    doParallel::registerDoParallel(cl, cores=nthreads)
+    doRNG::registerDoRNG(seed)
+    res = foreach::foreach (j = 1:nrow(tmp2),
+                   .packages=c("mclust","Matrix","MASS", "flowTrans", "flowCore", "grDevices", "graphics", "stats", "rDBEC"),
+                   .multicombine=TRUE,
+                   .maxcombine=nrow(tmp2),
+                   .inorder=TRUE,
+                   .noexport=setdiff(ls(),c("tmp2", "dir.name_DBEC1", "background_subtraction_Biex_wrapper",
+                                            "minimum_ave", "min_diff", "uncert.thre","flooring",
+                                            "modelnames", "iteration", "seed")),
+                   .options.RNG=seed
+    ) %dopar% {
+      background_subtraction_Biex_wrapper(tmp2,
+                                          j,
+                                          modelnames=modelnames,
+                                          min.ave=minimum_ave,
+                                          min.diff=min_diff,
+                                          iteration=iteration,
+                                          flooring=0,
+                                          uncert.thre=uncert.thre,
+                                          dir.name=dir.name_DBEC1,
+                                          seed = seed)
+    }
+    parallel::stopCluster(cl)
+    invisible(replicate(5, gc()))
+    res = unlist(res, recursive = FALSE, use.names = FALSE)
+    tmp3 = res != 0
+    tmp4 = tmp2[tmp3,,drop=F] #DBEC mack data
+    tmp5 = res[tmp3]   #DBEC threshold counts
+
+    tmp6 = cbind(gene_short_name=rownames(tmp4), tmp5)
+    colnames(tmp6)=c("gene_short_name", sample.name[i])
+
+    #concatenate DBEC threshold count tables
+    if (sample.name[i] == sample.name[1]) {
+      DBEC_genes = tmp6
+    } else {
+      DBEC_genes = dplyr::full_join(as.data.frame(DBEC_genes), as.data.frame(tmp6), by = "gene_short_name")
+      DBEC_genes = as.data.frame(DBEC_genes)
+    }
+    rm(tmp2)
+    rm(tmp3)
+    rm(tmp4)
+    rm(tmp5)
+    rm(tmp6)
+    rm(res)
+    invisible(replicate(5, gc()))
+    message(paste("Finish sample ", sample.name[i], " processing", sep=""))
+  }
+  
+  if (nsamples >1){
+  #concatenate DBEC filter between samples
+  message(paste("Concatenate DBEC filters...", sep=""))
+  DBEC_genes=as.matrix(DBEC_genes)
+  DBEC_genes1=as.data.frame(as.numeric(DBEC_genes[,2]), drop=F)
+  colnames(DBEC_genes1)=sample.name[1]
+    for (i in c(2:nsamples)){
+      DBEC_genes1=cbind(DBEC_genes1,as.numeric(DBEC_genes[,i+1]))
+      colnames(DBEC_genes1)[i]=sample.name[i]
+    }
+  #fill in NA values of DBEC filter
+  rownames(DBEC_genes1)=DBEC_genes[,1]
+  median_read_depth=unlist(median_read_depth)
+
+  #set global DBEC filter as median of the threshold count of all of the datasets
+  #DBEC filter thresholds were corrected by median read depth of the cells of each datasets
+  res1 = apply(DBEC_genes1, 1, stats::median, na.rm=T)
+  temp=median_read_depth
+  temp_mean=mean(temp)
+  temp=median_read_depth / temp_mean
+
+  for (i in c(1:nsamples)){
+    DBEC_genes1[,i] = ceiling(res1*temp[i])
+  }
+  res1 = as.data.frame(DBEC_genes1)
+
+  for (i in c(1:nsamples)){
+    message(paste("Generate DBEC filter figures of ", sample.name[i], sep=""))
+    folder_name = sprintf("DBEC_thresholds_%s", sample.name[i])
+    dir.name_DBEC1 = paste(dir.name_DBEC, folder_name, sep="")
+    expression_table = x[[i]][intersect(rownames(x[[i]]), rownames(res1)),]
+    DBEC_thre_tmp = res1[intersect(rownames(x[[i]]), rownames(res1)),i,drop=F]
+    cl = parallelly::makeClusterPSOCK(workers=8, autoStop = TRUE, useXDR=FALSE)
+    doParallel::registerDoParallel(cl, cores=8)
+    doRNG::registerDoRNG(seed)
+    foreach::foreach (j = 1:nrow(expression_table),
+                            .packages=c("Matrix","MASS", "grDevices", "graphics", "stats", "rDBEC"),
+                            .inorder=TRUE,
+                            .noexport=setdiff(ls(),c("expression_table", "DBEC_thre_tmp", "dir.name_DBEC1"))
+    ) %dopar% {
+      DBEC_figureDraw(x=expression_table, j, DBEC_threshold=DBEC_thre_tmp, dir.name=dir.name_DBEC1)
+    }
+    parallel::stopCluster(cl)
+    quiet(gc())
+    Sys.sleep(10)
+  }
+
+  } else {
+  tmp=as.matrix(DBEC_genes)
+  tmp1=as.numeric(DBEC_genes[,2])
+  rownames(tmp)=tmp[,1]
+  tmp=as.data.frame(tmp)
+  tmp=cbind(tmp, tmp1)
+  res1=tmp[,3,drop=F]
+  colnames(res1)=sample.name[1]
+  }
+ 
+  DBEC_filter=res1
+ message("Apply DBEC filter to expression tables...")
+ names(DBEC_filter) = fnames
+ DBEC_res = apply_DBEC_filter(tablelist, DBEC_filter=DBEC_filter, nthreads=8, sample.name = fnames)
+ names(DBEC_res) = fnames
+
+ ##create Seurat object (Seurat v2 workflow) and merge them
+ if (packageVersion("Seurat") == "2.3.4"){
+ tablelist = lapply(DBEC_res, CreateSeuratObject, min.cells = 5, min.genes = 500)
+} else if (packageVersion("Seurat") >= "3.0"){
+ tablelist = lapply(DBEC_res, CreateSeuratObject, min.cells = 5, min.features = 500)
+  }
+  if(length(fnames)==1){
+  mBC = tablelist[[1]]
+  }
+ 
+dir.name = paste("./result/", result_dir_name, sep="")
+dir.name.1 = paste(dir.name, "/Seurat", sep="")
+ 
+ 
+``` 
+
+```{r analysis_DBEC2, echo=FALSE, cache=FALSE}
+
+setwd("../") #must set working directory. default is .Rmd-existing path.
+message("Merge data... .")
+
+#add experiment ID
+#for (i in c(1:length(tablelist))){
+#  hoge = paste(tablelist[[i]]@meta.data$orig.ident, fnames[i], sep=".") 
+#  names(hoge) = rownames(tablelist[[i]]@meta.data)
+#  tablelist[[i]] = AddMetaData(tablelist[[i]], metadata = hoge, col.name = "orig.ident")
+# }
+
+
+ if(length(fnames)>1){
+ mBC = tablelist[[1]]
+ for (i in c(2:length(tablelist))){
+   if (mBC@version == "2.3.4"){
+   mBC = MergeSeurat(mBC, tablelist[[i]])
+   } else if (mBC@version >= "3.0"){
+   mBC = merge(mBC, tablelist[[i]], project="combined")
+   }
+ }
+ }
+ 
+
+
+ #filter out doublets
+
+doublet_key=NULL
+
+for ( i in c(1:length(fnames))){
+  doublet_key=c(doublet_key, paste(c("doublet", "not-detected", "not.detected", "not"), fnames[i], sep="."))
+}
+
+if (mBC@version == "2.3.4"){
+ doublets = mBC@meta.data$orig.ident %in% doublet_key
+ mBC = SubsetData(object = mBC, cells.use=rownames(mBC@meta.data[!doublets,]),
+                 subset.raw = TRUE)
+ } else if (mBC@version >= "3.0"){
+ doublets = grep(unique(mBC@meta.data$orig.ident), pattern = "doublet", value=TRUE)
+ not_detected = grep(unique(mBC@meta.data$orig.ident), pattern = "not", value=TRUE)
+ doublets = mBC@meta.data$orig.ident %in% c(doublets, not_detected)
+ mBC = subset(mBC, cells = rownames(mBC@meta.data[!doublets,]))  
+   
+   }
+
+ 
+ tmp = table(mBC@meta.data$orig.ident)
+ tmp = as.data.frame(tmp)
+ rownames(tmp)=tmp[,1]
+ tmp = tmp[!rownames(tmp)%in%c("doublet", "not-detected", "not.detected", "not"),]
+ logs_Ncells = as.data.frame(t(tmp))
+ logs_Ncells = logs_Ncells[2,,drop=F]
+ rownames(logs_Ncells)="cell number"
+
+
+```
+
+
+```{r output_table2, echo=FALSE, cache=FALSE, eval = TRUE, dpi=300, out.width = 1000, out.height = 500, fig.align='center'}
+DT::datatable(logs_Ncells, filter="none", width='100%',
+          caption = 'Table 1: Number of cells assigned to each sample', 
+          class = 'cell-border stripe', 
+          options = list(pageLength=1, searching=FALSE, lengthChange=FALSE, autoWidth = TRUE, scrollX=F)) %>%
+   DT::formatStyle(columns = c(1:ncol(logs_Ncells)), fontSize = 8)
+```
+
+---
+
+
+## Seurat pre-processing
+
+Perform Seurat (version `r paste(mBC@version)`) analysis.  
+- <https://satijalab.org/seurat/>  
+Please see Seurat vignettes (PBMC3K tutorial) for detail explanation of the each step of Seurat analysis.  
+- <https://satijalab.org/seurat/articles/pbmc3k_tutorial.html>  
+Entire Seurat object was saved by using qs package with .qs extension. Please use qs package to read .qs file with R.  
+
+We first calculating metrics (percent.mito, percent,ribo) and filtered out mitochondrial gene-high cells (over 0.25), doublets, and not-hashtag-assigned cells.  
+Because BD Rhapsody TAS-Seq data is non-UMI data (raw count data), we perform global normalization to 1M tags and perform scaling by using Seurat ScaleData function with regressing out library size (total raw read count of each cells) as a confounding factor.  
+`r if(downsampling){paste("Total cell number of each tag was downsampled to the minimum cell number of each tag after filtered out doublets, not-tag-assigned cells and low quality cells.", sep="")}`    
+
+---
+
+```{r Seurat_step1, echo=FALSE, cache=FALSE}
+
+quiet(gc())
+setwd("../") #must set working directory. default is .Rmd-existing path.
+if (mBC@version >= "3.0"){
+library(future)
+plan("multicore", workers = threads)
+options(future.rng.onMisuse="ignore") #OF RNG warnings of future, because Seurat do not use RNG inside future_lapply function
+} 
+
+if (mBC@version == "2.3.4"){
+colnames(mBC@meta.data)[2]="nReads"
+} else if (mBC@version >= "3.0"){
+colnames(mBC@meta.data)[3]="nGene"
+colnames(mBC@meta.data)[2]="nReads"
+}
+
+#add metadata
+
+colnames(mBC@meta.data)[2]="nReads"
+if (mBC@version == "2.3.4"){
+ raw.data.seurat = mBC@raw.data
+ } else if (mBC@version >= "3.0"){
+ raw.data.seurat = mBC@assays$RNA@counts
+ }
+
+if(species == "mmu"){
+ mito.genes = grep(pattern = "^mt.", x = rownames(x = raw.data.seurat), value = TRUE)
+ percent.mito = Matrix::colSums(raw.data.seurat[mito.genes, ])/Matrix::colSums(raw.data.seurat)
+  names(percent.mito)=rownames(mBC@meta.data)
+ mBC = AddMetaData(object = mBC, metadata = percent.mito, col.name = "percent.mito")
+
+ ribo.genes = grep(pattern = "^Rp[sl][[:digit:]]", x = rownames(x = raw.data.seurat), value = TRUE)
+ percent.ribo = Matrix::colSums(raw.data.seurat[ribo.genes, ])/Matrix::colSums(raw.data.seurat)
+   names(percent.ribo)=rownames(mBC@meta.data)
+ mBC = AddMetaData(object = mBC, metadata = percent.ribo, col.name = "percent.ribo")
+ 
+ riboRNA.genes = grep(pattern = "^Rn[[:digit:]]", x = rownames(x = raw.data.seurat), value = TRUE)
+  if(length(riboRNA.genes)>1){
+ percent.riboRNA = Matrix::colSums(raw.data.seurat[riboRNA.genes, ])/Matrix::colSums(raw.data.seurat)
+    names(percent.riboRNA)=rownames(mBC@meta.data)
+ mBC = AddMetaData(object = mBC, metadata = percent.riboRNA, col.name = "percent.riboRNA")
+ } else if (length(riboRNA.genes)==1){
+ percent.riboRNA = raw.data.seurat[riboRNA.genes, ]/Matrix::colSums(raw.data.seurat)
+    names(percent.riboRNA)=rownames(mBC@meta.data)
+ mBC = AddMetaData(object = mBC, metadata = percent.riboRNA, col.name = "percent.riboRNA")
+ } else {
+ percent.riboRNA = rep(0, ncol(raw.data.seurat))
+ names(percent.riboRNA) = rownames(mBC@meta.data)
+ mBC = AddMetaData(object = mBC, metadata = percent.riboRNA, col.name = "percent.riboRNA")
+ }
+} else if(species == "hsa"){
+ mito.genes = grep(pattern = "^MT.", x = rownames(x = raw.data.seurat), value = TRUE)
+ percent.mito = Matrix::colSums(raw.data.seurat[mito.genes, ])/Matrix::colSums(raw.data.seurat)
+ names(percent.mito)=rownames(mBC@meta.data)
+ mBC = AddMetaData(object = mBC, metadata = percent.mito, col.name = "percent.mito")
+
+ ribo.genes = grep(pattern = "^RP[SL][[:digit:]]", x = rownames(x = raw.data.seurat), value = TRUE)
+ percent.ribo = Matrix::colSums(raw.data.seurat[ribo.genes, ])/Matrix::colSums(raw.data.seurat)
+  names(percent.ribo)=rownames(mBC@meta.data)
+ mBC = AddMetaData(object = mBC, metadata = percent.ribo, col.name = "percent.ribo")
+
+ riboRNA.genes = grep(pattern = "^RNA[[:digit:]]", x = rownames(x = raw.data.seurat), value = TRUE)
+  if(length(riboRNA.genes)>1){
+ percent.riboRNA = Matrix::colSums(raw.data.seurat[riboRNA.genes, ])/Matrix::colSums(raw.data.seurat)
+   names(percent.riboRNA)=rownames(mBC@meta.data)
+ mBC = AddMetaData(object = mBC, metadata = percent.riboRNA, col.name = "percent.riboRNA")
+ } else if (length(riboRNA.genes)==1){
+ percent.riboRNA = raw.data.seurat[riboRNA.genes, ]/Matrix::colSums(raw.data.seurat)
+ names(percent.riboRNA)=rownames(mBC@meta.data)
+ mBC = AddMetaData(object = mBC, metadata = percent.riboRNA, col.name = "percent.riboRNA")
+ } else {
+ percent.riboRNA = rep(0, ncol(raw.data.seurat))
+ names(percent.riboRNA) = rownames(mBC@meta.data)
+ mBC = AddMetaData(object = mBC, metadata = percent.riboRNA, col.name = "percent.riboRNA")
+ }
+} else if(species == "rat"){
+ mito.genes = grep(pattern = "^Mt.", x = rownames(x = raw.data.seurat), value = TRUE)
+ percent.mito = Matrix::colSums(raw.data.seurat[mito.genes, ])/Matrix::colSums(raw.data.seurat)
+ mBC = AddMetaData(object = mBC, metadata = percent.mito, col.name = "percent.mito")
+
+ ribo.genes = grep(pattern = "^Rp[sl][[:digit:]]", x = rownames(x = raw.data.seurat), value = TRUE)
+ percent.ribo = Matrix::colSums(raw.data.seurat[ribo.genes, ])/Matrix::colSums(raw.data.seurat)
+   names(percent.ribo)=rownames(mBC@meta.data)
+ mBC = AddMetaData(object = mBC, metadata = percent.ribo, col.name = "percent.ribo")
+
+ riboRNA.genes = grep(pattern = "^Rn[[:digit:]]", x = rownames(x = raw.data.seurat), value = TRUE)
+  if(length(riboRNA.genes)>1){
+ percent.riboRNA = Matrix::colSums(raw.data.seurat[riboRNA.genes, ])/Matrix::colSums(raw.data.seurat)
+    names(percent.riboRNA)=rownames(mBC@meta.data)
+ mBC = AddMetaData(object = mBC, metadata = percent.riboRNA, col.name = "percent.riboRNA")
+ } else if (length(riboRNA.genes)==1){
+ percent.riboRNA = raw.data.seurat[riboRNA.genes, ]/Matrix::colSums(raw.data.seurat)
+    names(percent.riboRNA)=rownames(mBC@meta.data)
+ mBC = AddMetaData(object = mBC, metadata = percent.riboRNA, col.name = "percent.riboRNA")
+ } else {
+ percent.riboRNA = rep(0, ncol(raw.data.seurat))
+ names(percent.riboRNA) = rownames(mBC@meta.data)
+ mBC = AddMetaData(object = mBC, metadata = percent.riboRNA, col.name = "percent.riboRNA")
+ }
+}
+
+nReads_log = log10(Matrix::colSums(raw.data.seurat))
+mBC = AddMetaData(object = mBC, metadata = nReads_log, col.name = "nReads.log")
+
+
+#plot statistics
+file.name=paste(dir.name.plot1, sample_name, "_stats.png", sep="")
+
+fuga = data.frame(nGene = mBC@meta.data$nGene, mito.proportion = mBC@meta.data$percent.mito)
+p.mito = ggplot(fuga) + 
+  geom_hex(aes(nGene, mito.proportion), 
+           bins = 100, 
+           show.legend = TRUE) +
+  ylim(0, 1) +
+  scale_fill_gradientn("cell number", colours = rev(rainbow(10, end = 4/6))) + 
+  geom_hline(aes(yintercept=0.25), colour="magenta", size=0.5) +
+  scale_x_continuous(breaks=seq(0,round(max(mBC@meta.data$nGene), digits=-3),2000))+
+  ggtitle("Mitochondrial gene proportion") +
+  theme_linedraw() +
+  theme(plot.title=element_text(hjust = 0.5), text=element_text(size=10)) + 
+  theme(axis.text.x=element_text(size=10), axis.text.y=element_text(size=10))
+
+fuga = data.frame(nGene = mBC@meta.data$nGene, Ribosomal.protein.proportion = mBC@meta.data$percent.ribo)
+p.ribo = ggplot(fuga) + 
+  geom_hex(aes(nGene, Ribosomal.protein.proportion), 
+           bins = 100, 
+           show.legend = TRUE) +
+  scale_fill_gradientn("cell number", colours = rev(rainbow(10, end = 4/6))) + 
+  scale_x_continuous(breaks=seq(0,round(max(mBC@meta.data$nGene), digits=-3),2000))+
+  ggtitle("Ribosomal protein gene proportion") +
+  theme_linedraw() +
+  theme(plot.title=element_text(hjust = 0.5), text=element_text(size=10)) + 
+  theme(axis.text.x=element_text(size=10), axis.text.y=element_text(size=10))
+
+fuga = data.frame(nGene = mBC@meta.data$nGene, RibosomalRNA.proportion = mBC@meta.data$percent.riboRNA)
+p.riboRNA = ggplot(fuga) + 
+  geom_hex(aes(nGene, RibosomalRNA.proportion), 
+           bins = 100, 
+           show.legend = TRUE) +
+  scale_fill_gradientn("cell number", colours = rev(rainbow(10, end = 4/6))) + 
+  scale_x_continuous(breaks=seq(0,round(max(mBC@meta.data$nGene), digits=-3),2000))+
+  ggtitle("RibosomalRNA proportion") +
+  theme_linedraw() +
+  theme(plot.title=element_text(hjust = 0.5), text=element_text(size=10)) + 
+  theme(axis.text.x=element_text(size=10), axis.text.y=element_text(size=10))
+
+fuga = data.frame(nGene = mBC@meta.data$nGene, nReads = mBC@meta.data$nReads)
+p.Gene = ggplot(fuga) + 
+  geom_hex(aes(nReads, nGene), 
+           bins = 100, 
+           show.legend = TRUE) +
+  scale_fill_gradientn("cell number", colours = rev(rainbow(10, end = 4/6))) + 
+  geom_hline(aes(yintercept=500), colour="magenta", size=0.5) +
+  scale_y_continuous(breaks=seq(0,round(max(mBC@meta.data$nGene), digits=-3),2000))+
+  ggtitle("Genes-reads distribution") +
+  theme_linedraw() +
+  theme(plot.title=element_text(hjust = 0.5), text=element_text(size=10)) + 
+  theme(axis.text.x=element_text(size=10), axis.text.y=element_text(size=10))
+p_stats = plot_grid(p.mito, p.ribo, p.riboRNA, p.Gene, ncol=2, nrow=2)
+ggsave(file = file.name, plot = p_stats, 
+       device="png", units="in", dpi = 300,
+       width = 12, height = 8, limitsize=FALSE)
+
+#filter out outliers
+if (mBC@version == "2.3.4"){
+mBC = FilterCells(object = mBC, subset.names = c("percent.mito", "nGene"),
+                  low.thresholds = c(-Inf, 200), high.thresholds = c(0.25, Inf))
+} else if (mBC@version >= "3.0"){
+mBC = subset(mBC, subset = percent.mito < 0.25 & nGene >= 200)  
+}
+
+
+file.name=paste(dir.name.plot1, sample_name, "_nGene.png", sep='')
+if (mBC@version == "2.3.4"){
+p.nGene = RidgePlot(object = mBC, features.plot = "nGene", group.by="orig.ident", nCol = 1, do.return=TRUE)
+} else if (mBC@version >= "3.0"){
+p.nGene = RidgePlot(object = mBC, features = "nGene", group.by="orig.ident", combine=TRUE) +
+          theme(legend.position = "none")
+}
+
+ggsave(file = file.name, plot = p.nGene, device="png", units="in", dpi = 300,
+       width = 8, height = max(5*length(unique(mBC@meta.data$orig.ident))/15, 5), limitsize=FALSE)
+
+file.name=paste(dir.name.plot1, sample_name, "_nReads_log.png", sep='')
+
+if (mBC@version == "2.3.4"){
+p.nReads = RidgePlot(object = mBC, features.plot = "nReads.log", group.by="orig.ident", nCol = 1, do.return=TRUE)
+} else if (mBC@version >= "3.0"){
+p.nReads = RidgePlot(object = mBC, features = "nReads.log", group.by="orig.ident", combine=TRUE)  +
+          theme(legend.position = "none")
+}
+ggsave(file = file.name, plot = p.nReads, device="png", units="in", dpi = 300,
+       width = 8, height = max(5*length(unique(mBC@meta.data$orig.ident))/15, 5), limitsize=FALSE)
+
+
+#Downsampling against minimum cell count among tags
+if(downsampling){
+hoge = as.character(mBC@meta.data$orig.ident)
+names(hoge) = rownames(mBC@meta.data)
+mBC = AddMetaData(mBC, hoge, col.name = "orig.ident")
+hoge = mBC@meta.data$orig.ident
+names(hoge)=rownames(mBC@meta.data)
+hoge = as.factor(hoge)
+
+if (mBC@version == "2.3.4"){
+mBC@ident = hoge
+} else if (mBC@version >= "3.0"){
+mBC@active.ident = hoge
+}
+
+ if (mBC@version == "2.3.4"){
+ mBC@ident = hoge
+ mBC = SubsetData(mBC, ident.use = unique(mBC@ident), max.cells.per.ident =   min(table(mBC@meta.data$orig.ident)), subset.raw = TRUE, random.seed = 42)
+ } else if (mBC@version >= "3.0"){
+ mBC@active.ident = hoge
+ mBC = subset(mBC, ident.use = unique(mBC@active.ident), max.cells.per.ident = min(table(mBC@meta.data$orig.ident)), subset.raw = TRUE, random.seed = 42)
+ }
+}
+
+# normalizing data
+ if (mBC@version == "2.3.4"){
+mBC = NormalizeData(object = mBC, scale.factor=1000000,display.progress = FALSE)
+message("Scaling data...")
+mBC = ScaleData(object = mBC, vars.to.regress = c("nReads"), do.par=TRUE, num.cores=threads, display.progress = FALSE)
+mBC = FindVariableGenes(object = mBC, mean.function = ExpMean, dispersion.function = LogVMR,
+                        x.low.cutoff = 0.1, x.high.cutoff = Inf, y.cutoff = 0.5, do.plot=FALSE)
+hvg.number = length(x = mBC@var.genes)
+} else if (mBC@version >= "3.0"){
+  
+mBC = NormalizeData(object = mBC, scale.factor=1000000,verbose = FALSE)
+message("find top5000 variable features...")
+mBC = FindVariableFeatures(mBC, selection.method = "mvp", nfeatures = 5000,
+                            mean.cutoff=c(0.1, Inf), dispersion.cutoff=c(0.5, Inf))
+message("Scaling data...")
+mBC = ScaleData(object = mBC, vars.to.regress = c("nReads"))
+hvg.number = length(x = mBC@assays$RNA@var.features)
+}
+
+
+message(paste(hvg.number, " of highly-variable genes detected."))
+
+
+```
+
+## Basic plots of statistics  {.tabset .tabset-fade}
+
+### stats1
+
+Figure 2. Density heatmap (pseudocolor) plot of statistics
+
+```{r Seurat_plot1, echo=FALSE, cache=FALSE, fig.width=12, fig.height=8, dpi=300, out.width = 700, out.height = 500, fig.align='center'}
+plot_grid(p_stats)
+ quiet(dev.off())
+
+```
+
+### stats2
+
+Figure 3. Ridge plot, separate by Tags  
+(after filtering low-quality cells)  
+
+```{r Seurat_plot2, echo=FALSE, cache=FALSE, fig.width=12, fig.height=max(4*length(unique(mBC@meta.data$orig.ident))/15, 5), dpi=300, out.width = 700, out.height = 300, fig.align='center'}
+plot_grid(p.nGene, p.nReads, ncol=2, nrow=1)
+ quiet(dev.off())
+```
+
+File locations  
+
+Plot files were stored at `r paste(dir.name.plot1, sep="")`.
+
+---
+
+## PCA and Jackstraw analysis
+
+Next, PCA analysis was performed against `r paste(hvg.number, " of highly-variable genes")` identified by `r if(mBC@version=="2.3.4"){paste("FindVariableGenes (x.low.cutoff = 0.1, y.low.cutoff=0.5) function in Seurat v2.3.4 in R 3.6.3", sep="")} else if(mBC@version>=3.0){paste("FindVariableFeatures (selection.method=mvp, mean.cutoff=c(0.1, Inf), dispersion.cutoff=c(1, Inf)) function in Seurat v", mBC@version, "in ", version$version.string, sep="")}`.  
+
+```{r Seurat_step2, echo=FALSE, cache=FALSE}
+quiet(gc())
+setwd("../") #must set working directory. default is .Rmd-existing path.
+message("Perform PCA...")
+
+ if (mBC@version == "2.3.4"){
+mBC = RunPCA(object = mBC, pc.genes = mBC@var.genes, do.print = FALSE, pcs.compute = 150, overwrite=TRUE)
+mBC = ProjectPCA(object = mBC, do.print = FALSE)
+} else if (mBC@version >= "3.0"){
+mBC = RunPCA(object = mBC, features = VariableFeatures(object = mBC), 
+             npcs=150, verbose = FALSE)
+}
+
+
+message("Perform Jackstraw analysis...")
+dims=1:150
+
+plan("multisession", workers = 4)
+
+if (mBC@version == "2.3.4"){
+ mBC = JackStraw(object = mBC, num.replicate = 100, num.pc = 150,do.par=TRUE, num.cores=2, display.progress = FALSE)
+ file.name=paste(dir.name.plot1, sample_name, "_Jackstraw.png", sep='')
+ png(file.name, width = 750, height = 2000)
+ mBC = JackStrawPlot(object = mBC, PCs = 1:150)
+ quiet(dev.off())
+ quiet(gc())
+ tmp = as.data.frame(mBC@dr$pca@jackstraw@overall.p.values)
+ tmp1 = tmp[tmp$Score>0.05,1]
+ if(length(tmp1)<1){
+ dims=1:150
+ } else {
+ dims= c(1:(min(tmp1)-1))
+}
+
+#} else if (FALSE){
+} else if (mBC@version >= "3.0"){
+  mBC = JackStraw(mBC, num.replicate = 100, dims = 150, verbose = TRUE)
+  mBC = ScoreJackStraw(mBC, dims = 1:150, score.thresh = 0.05)
+ #return p-value of Jackstraw analysis
+ JS_res = mBC@reductions$pca@jackstraw$overall.p.values
+ tmp = JS_res[JS_res[,2]> 1e-05,,drop=F]
+ if(nrow(tmp)>0){
+   if((min(tmp[,1]-1)<=5)){
+     dims = 1:5
+     file.name=paste(dir.name.plot1, sample_name, "_Jackstraw.png", sep='')
+     p_Jackstraw = JackStrawPlot(mBC, dims = 1:5)
+     ggsave(p_Jackstraw, file=file.name, device = "png", 
+        units = "in", dpi = 300, width=8, height=4,limitsize = FALSE)
+    } else {
+    dims =c(1:(min(tmp[,1])-1))
+    file.name=paste(dir.name.plot1, sample_name, "_Jackstraw.png", sep='')
+    p_Jackstraw = JackStrawPlot(mBC, dims = c(max(1,(min(tmp[,1])-10)):(min(tmp[,1]))))
+    ggsave(p_Jackstraw, file=file.name, device = "png", 
+        units = "in", dpi = 300, width=8, height=4,limitsize = FALSE)
+   }
+ } else {
+  dims = 1:150
+  file.name=paste(dir.name.plot1, sample_name, "_Jackstraw.png", sep='')
+  p_Jackstraw = JackStrawPlot(mBC, dims = 140:150)
+  ggsave(p_Jackstraw, file=file.name, device = "png", 
+        units = "in", dpi = 300, width=8, height=4,limitsize = FALSE)
+ }
+}
+
+
+
+resolution = c(1, 1.5, 2.0, 2.5, 3.0, 3.5)
+
+if(nrow(mBC@meta.data)/200 >=500){
+perplexity = 500
+} else if (nrow(mBC@meta.data)/200 >=300){
+perplexity = 400 
+} else if (nrow(mBC@meta.data)/200 >=200){
+perplexity = 300 
+} else if (nrow(mBC@meta.data)/200 >=100){
+perplexity = 200 
+} else if (nrow(mBC@meta.data)/200 >=50){
+perplexity = 100   
+}else if (nrow(mBC@meta.data)/200 >=25){
+perplexity = 50   
+}else if (nrow(mBC@meta.data)/200 >=12.5){
+perplexity = 25   
+}else {
+perplexity = 10 
+}
+
+```
+
+Figure 3-1. Jackstraw plot  
+
+```{r Seurat_plot_jackstraw, echo=FALSE, cache=FALSE, fig.width=8, fig.height=4, dpi=300, out.width = 800, out.height = 400, fig.align='center'}
+plot_grid(p_Jackstraw)
+quiet(dev.off())
+quiet(gc)
+```
+
+`r if((nrow(tmp)>0) && ((min(tmp[,1]-1)>5))){paste("1:", max(dims), " PCs were selected (p<1e-05)", sep="")} else if ((nrow(tmp)>0) && ((min(tmp[,1]-1)<=5))){paste("1:", max(dims), " PCs were selected because the number of significant PC was under 5",sep="")} else {paste("1:150 PCs were selected because the number of significant PC was over 150")}`.  
+
+Jackstraw plot file was stored at `r paste(file.name)`.  
+
+---
+
+## Clustering
+
+Cell clustering was performed by using `r if(mBC@version=="2.3.4"){paste("FindClusters function in Seurat v2.3.4 in R 3.6.3", sep="")} else if(mBC@version>=3.0){paste("FindNeighbors and FindClusters function in Seurat v", mBC@version, " in ", version$version.string, sep="")}`.  
+`r paste("1:", max(dims), " PCs were used for clustering analysis.", sep="")`  
+Clustering resolution parameters were changed sequentially (from 1.0 to 3.5) and evaluate clustering stability by using silhouette score against FIt-SNE space.  
+
+```{r Seurat_dimReduc, echo=FALSE, cache=FALSE}
+
+
+quiet(gc())
+setwd("../") #must set working directory. default is .Rmd-existing path.
+message("Perform clustering...")
+suppressMessages(library(cluster))
+suppressMessages(library(parallelDist))
+column_number = ncol(mBC@meta.data)
+
+#perform FItSNE dimReduction
+quiet(py_set_seed(42))
+mBC = DoFItSNE(mBC, reduction_use = "pca", dims_use = as.integer(dims),
+               perplexity=perplexity, n_jobs=as.integer(detectCores()/2), df = 0.9)
+
+quiet(py_set_seed(42))
+mBC = RunUMAP(mBC, reduction = "pca", dims = dims)
+
+
+#subset data for clustering estimation
+message(paste("Finding optimal clustering resolution by silhouette method..."))
+
+if(nrow(mBC@meta.data)>=30000){
+message(paste("Data was downsampled to 30000 cells total for reducing computing cost..."))
+ hoge = mBC@meta.data$orig.ident
+ names(hoge)=rownames(mBC@meta.data)
+ hoge = as.factor(hoge)
+ if (mBC@version == "2.3.4"){
+  mBC@ident=hoge
+  mBC1 = SubsetData(object = mBC, ident.use = unique(as.character(mBC@ident)), 
+                  max.cells.per.ident = round(30000/length(unique(as.character(mBC@ident))), digits = 0))
+ } else if (mBC@version >= "3.0"){
+  mBC@active.ident=hoge
+  mBC1 = subset(x = mBC, idents= unique(as.character(mBC@active.ident)), 
+                  downsample = round(30000/length(unique(as.character(mBC@active.ident))), digits = 0))
+ }
+} else {
+mBC1 = mBC
+}
+
+
+
+ if (mBC@version == "2.3.4"){
+distance_matrix = parallelDist::parDist(mBC1@dr$FItSNE@cell.embeddings, method = "euclidean", threads=detectCores()/2)
+} else if (mBC@version >= "3.0"){
+distance_matrix = parallelDist::parDist(Embeddings(object = mBC1@reductions$FItSNE), method = "euclidean", threads=detectCores()/2)
+}
+
+silhouette_score = NULL
+resolution = c(1, 1.5, 2.0, 2.5, 3.0, 3.5)
+quiet(gc())
+
+
+if (mBC@version == "2.3.4"){
+mBC1 = FindClusters(object = mBC1, reduction.type = "pca", dims.use = dims,
+                   resolution = c(1, 1.5,2,2.5,3,3.5), print.output = 0, save.SNN = TRUE, 
+                   force.recalc = TRUE)
+} else if (mBC@version >= "3.0"){
+mBC1 = FindNeighbors(mBC1, dims=dims)
+mBC1 = FindClusters(object = mBC1, resolution = resolution, random.seed=42, verbose = FALSE)
+}
+
+if (mBC@version == "2.3.4"){
+resolution1=paste("res.", c("1", "1.5","2","2.5","3","3.5"), sep="")
+} else if (mBC@version >= "3.0"){
+resolution1=paste("RNA_snn_res.", c("1", "1.5","2","2.5","3","3.5"), sep="")  
+}
+
+sil_ALL=NULL
+resolution2 = c("1", "1.5", "2.0", "2.5", "3.0", "3.5")
+#calculate silhouette score
+for (i in c(1:6)){
+  message(paste("resolution ", resolution[i], "...", sep=""))
+  sil = cluster::silhouette(x=as.integer(mBC1@meta.data[,resolution1[i]]),
+                          dist = distance_matrix)
+  sil = sil[,3]
+  silhouette_score = c(silhouette_score, mean(sil))
+  names(silhouette_score)[i]=resolution[i]
+  names(sil)=rownames(mBC1@meta.data)
+  silhouette.name = sprintf("silhouette_score.res.%s", resolution[i])
+  mBC1 =  AddMetaData(object = mBC1, metadata = sil, col.name = silhouette.name)
+  
+  sil = as.data.frame(sil)
+  sil = cbind(sil, rep(resolution2[i], nrow(sil)))
+  colnames(sil)=c("silhouette", "resolution")
+  sil_ALL = rbind(sil_ALL, sil)
+  
+ }
+
+max_silhouette = names(silhouette_score[which(silhouette_score == max(silhouette_score))])
+
+x = data.frame(resolution = c("1", "1.5", "2.0", "2.5", "3.0", "3.5"),
+    mean_silhouette_score = silhouette_score)
+
+p_silhouette = ggplot(as.data.frame(sil_ALL), aes(x = resolution, y = silhouette)) +
+               geom_boxplot(outline=FALSE) +
+               stat_summary(fun=mean, geom="point", col="red")+
+               stat_summary(fun=mean, geom="text", col="red", vjust=1.5, aes(label=paste0("Mean: ", round(..y.., digits=3))))+
+               ggtitle("silhouette scores of clustering") +
+               theme_linedraw() + 
+               theme(plot.title=element_text(hjust = 0.5), text=element_text(size=12)) + 
+               theme(axis.text.x=element_text(size=12), axis.text.y=element_text(size=12)) 
+file.name=paste(dir.name.plot1, sample_name, "_silhouette.png", sep='')
+ggsave(file = file.name, plot = p_silhouette, device="png", units="in", dpi = 300,
+       width = 4, height = 3, limitsize=FALSE)
+
+rm(mBC1)
+quiet(gc())
+
+#select resolution value of which mean silhouette score is maximum
+message("Clustering original data...")
+if(mBC@version >= "3.0"){
+mBC = FindNeighbors(mBC, dims=dims)
+}
+
+if (mBC@version == "2.3.4"){
+mBC = FindClusters(object = mBC, reduction.type = "pca", dims.use = dims,
+                   resolution = c(1, 1.5,2,2.5,3,3.5), print.output = 0, save.SNN = TRUE, 
+                   force.recalc = TRUE)
+
+#set idents as optinal clustering result
+mBC = FindClusters(object = mBC, reduction.type = "pca", dims.use = dims,
+                   resolution = resolution[as.numeric(which(silhouette_score == max(silhouette_score)))], 
+                   print.output = 0, save.SNN = TRUE, 
+                   force.recalc = TRUE)
+} else if (mBC@version >= 3.0){
+mBC = FindClusters(object = mBC, resolution = resolution, random.seed=42, verbose=FALSE)
+#set idents as optinal clustering result
+mBC = FindClusters(object = mBC, resolution = resolution[as.numeric(which(silhouette_score == max(silhouette_score)))], verbose=FALSE, random.seed=42)
+}
+
+message(paste("done."))
+quiet(gc())
+
+if (mBC@version == "2.3.4"){
+tmp=paste("res.", c("1", "1.5","2","2.5","3", "3.5"), sep="")
+} else if (mBC@version >= "3.0"){
+tmp=paste("RNA_snn_res.", c("1","1.5","2","2.5","3", "3.5"), sep="")  
+}
+tmp1 = c("resolution 1", "resolution 1.5", "resolution 2", "resolution 2.5", "resolution 3", "resolution 3.5")
+
+for (i in c(1:6)){
+  hoge = as.character(mBC@meta.data[,tmp[i]])
+  hoge = as.numeric(hoge)
+  names(hoge)=rownames(mBC@meta.data)
+  hoge = as.factor(hoge)
+  mBC = AddMetaData(mBC, hoge, col.name=tmp[i])
+}
+
+if (mBC@version == "2.3.4"){
+Ncluster = c(length(unique(mBC@meta.data$res.1)),
+             length(unique(mBC@meta.data$res.1.5)),
+             length(unique(mBC@meta.data$res.2)),
+             length(unique(mBC@meta.data$res.2.5)),
+             length(unique(mBC@meta.data$res.3)),
+             length(unique(mBC@meta.data$res.3.5)))
+} else if (mBC@version >= "3.0"){
+  Ncluster = c(length(unique(mBC@meta.data$RNA_snn_res.1)),
+             length(unique(mBC@meta.data$RNA_snn_res.1.5)),
+             length(unique(mBC@meta.data$RNA_snn_res.2)),
+             length(unique(mBC@meta.data$RNA_snn_res.2.5)),
+             length(unique(mBC@meta.data$RNA_snn_res.3)),
+             length(unique(mBC@meta.data$RNA_snn_res.3.5)))
+}
+
+#perform FItSNE and UMAP visualization
+dimReduc_plot=list()
+dimReduc_plot_legend=list()
+dimReduc_plot_UMAP=list()
+dimReduc_plot_legend_UMAP=list()
+
+if (mBC@version == "2.3.4"){
+tmp = c("res.1", "res.1.5", "res.2", "res.2.5", "res.3", "res.3.5")
+} else if (mBC@version >= "3.0"){
+tmp=paste("RNA_snn_res.", c("1", "1.5","2","2.5","3","3.5"), sep="")  
+}
+
+tmp1 = c("resolution 1", "resolution 1.5", "resolution 2", "resolution 2.5", "resolution 3", "resolution 3.5")
+
+for (i in c(1:6)){
+  hoge = mBC@meta.data[,tmp[i]]
+  hoge = as.character(hoge)
+  hoge = as.numeric(hoge)
+  names(hoge)=rownames(mBC@meta.data)
+  hoge = factor(hoge)
+  mBC = AddMetaData(mBC, hoge, col.name=tmp[i])
+}
+
+if (mBC@version == "2.3.4"){
+p = DimPlot(object = mBC, reduction.use = "FItSNE", group.by = "orig.ident",label.size = 4,
+                     do.return = TRUE, vector.friendly = FALSE, pt.size = 0.5 * 1400/nrow(mBC@meta.data),
+                     no.legend=FALSE) +
+                     theme(axis.title.x = element_text(size=10, family = "Arial"),
+                     axis.title.y = element_text(size=10, family = "Arial"),
+                     axis.text.x = element_text(size=10, colour = 1, family = "Arial"),
+                     axis.text.y = element_text(size = 10, colour = 1, family = "Arial")) +
+                     theme(panel.border = element_rect(fill = NA, size = 1.0))
+p_legend <- cowplot::get_legend(p)
+} else if (mBC@version >= "3.0"){
+  p = DimPlot(object = mBC, reduction = "FItSNE", group.by = "orig.ident",label.size = 4,
+                     combine = FALSE, pt.size = min(0.5 * 1400/nrow(mBC@meta.data), 1), raster=FALSE)
+    p = lapply(X = p, FUN=function(x){x + 
+                     theme(axis.title.x = element_text(size=8, family = "Arial"),
+                     axis.title.y = element_text(size=8, family = "Arial"),
+                     axis.text.x = element_text(size=8, colour = 1, family = "Arial"),
+                     axis.text.y = element_text(size = 8, colour = 1, family = "Arial"),
+                     plot.title = element_text(size = 8), legend.text = element_text(size=8))})
+  p = CombinePlots(p)
+  p_legend <- cowplot::get_legend(p)
+}
+
+p = p + theme_classic() + 
+        ggtitle(paste("Separate by tags", sep="")) +
+        theme(plot.title=element_text(hjust = 0.5), text=element_text(size=8))+
+        theme(axis.text.x=element_text(size=8), axis.text.y=element_text(size=8),
+              legend.position = 'none')
+dimReduc_plot[[1]]=p
+dimReduc_plot_legend[[1]]=p_legend
+
+#draw optimal clustering result
+if (mBC@version == "2.3.4"){
+p = DimPlot(object = mBC, reduction.use = "FItSNE", 
+            group.by = resolution1[as.numeric(which(silhouette_score == max(silhouette_score)))],label.size = 4,
+                     do.return = TRUE, vector.friendly = FALSE, pt.size = 0.5 * 1400/nrow(mBC@meta.data),
+                     no.legend=FALSE) +
+                     theme(axis.title.x = element_text(size=10, family = "Arial"),
+                     axis.title.y = element_text(size=10, family = "Arial"),
+                     axis.text.x = element_text(size=10, colour = 1, family = "Arial"),
+                     axis.text.y = element_text(size = 10, colour = 1, family = "Arial")) +
+                     theme(panel.border = element_rect(fill = NA, size = 1.0))
+p_legend <- cowplot::get_legend(p)
+} else if (mBC@version >= "3.0"){
+  p = DimPlot(object = mBC, reduction = "FItSNE", 
+              group.by = resolution1[as.numeric(which(silhouette_score == max(silhouette_score)))],
+              label.size = 4,label=TRUE,
+                     combine = FALSE, pt.size = min(0.5 * 1400/nrow(mBC@meta.data), 1), raster=FALSE)
+    p = lapply(X = p, FUN=function(x){x + 
+                     theme(axis.title.x = element_text(size=8, family = "Arial"),
+                     axis.title.y = element_text(size=8, family = "Arial"),
+                     axis.text.x = element_text(size=8, colour = 1, family = "Arial"),
+                     axis.text.y = element_text(size = 8, colour = 1, family = "Arial"),
+                     plot.title = element_text(size = 8), legend.text = element_text(size=8))})
+  p = CombinePlots(p)
+  p_legend <- cowplot::get_legend(p)
+}
+if(Ncluster[as.numeric(which(silhouette_score == max(silhouette_score)))] <= 104){
+p = p + theme_classic() + scale_color_manual(values = custom_colors$discrete, labels=levels(mBC@active.ident)) +  
+        ggtitle(resolution1[as.numeric(which(silhouette_score == max(silhouette_score)))]) +
+        theme(plot.title=element_text(hjust = 0.5), legend.position = 'none') 
+} else {
+  p = p + theme_classic() +  
+        ggtitle(resolution1[as.numeric(which(silhouette_score == max(silhouette_score)))]) +
+        theme(plot.title=element_text(hjust = 0.5), legend.position = 'none') 
+}
+
+dimReduc_plot[[8]]=p
+dimReduc_plot_legend[[8]]=p_legend
+
+file.name=paste(dir.name.plot1, sample_name, "_FItSNE_perplex", perplexity,  
+                "_resolution", resolution[as.numeric(which(silhouette_score == max(silhouette_score)))],
+                "_large.png", sep='')
+ggsave(file = file.name, 
+       plot = dimReduc_plot[[8]],
+       device="png", units="in", dpi = 300,
+       width = 4, height = 4, limitsize=FALSE)
+
+if (mBC@version == "2.3.4"){
+p = DimPlot(object = mBC, reduction.use = "umap", group.by = "orig.ident",label.size = 4,
+                     do.return = TRUE, vector.friendly = FALSE, pt.size = 0.5 * 1400/nrow(mBC@meta.data),
+                     no.legend=FALSE) +
+                     theme(axis.title.x = element_text(size=10, family = "Arial"),
+                     axis.title.y = element_text(size=10, family = "Arial"),
+                     axis.text.x = element_text(size=10, colour = 1, family = "Arial"),
+                     axis.text.y = element_text(size = 10, colour = 1, family = "Arial")) +
+                     theme(panel.border = element_rect(fill = NA, size = 1.0))
+p_legend <- cowplot::get_legend(p)
+} else if (mBC@version >= "3.0"){
+  p = DimPlot(object = mBC, reduction = "umap", group.by = "orig.ident",label.size = 4,
+                     combine = FALSE, pt.size = min(0.5 * 1400/nrow(mBC@meta.data), 1), raster=FALSE)
+  p = lapply(X = p, FUN=function(x){x + 
+                     theme(axis.title.x = element_text(size=8, family = "Arial"),
+                     axis.title.y = element_text(size=8, family = "Arial"),
+                     axis.text.x = element_text(size=8, colour = 1, family = "Arial"),
+                     axis.text.y = element_text(size = 8, colour = 1, family = "Arial"),
+                     plot.title = element_text(size = 8), legend.text = element_text(size=8))})
+  p = CombinePlots(p)
+  p_legend <- cowplot::get_legend(p)
+}
+
+p = p + theme_classic() +  
+        ggtitle(paste("Separate by tags", sep="")) +
+        theme(plot.title=element_text(hjust = 0.5), text=element_text(size=8))+
+        theme(axis.text.x=element_text(size=8), axis.text.y=element_text(size=8),
+              legend.position = 'none')
+dimReduc_plot_UMAP[[1]]=p
+dimReduc_plot_legend_UMAP[[1]]=p_legend
+
+
+#draw optimal clustering result
+if (mBC@version == "2.3.4"){
+p = DimPlot(object = mBC, reduction.use = "umap", 
+            group.by = resolution1[as.numeric(which(silhouette_score == max(silhouette_score)))],label.size = 4,
+                     do.return = TRUE, vector.friendly = FALSE, pt.size = 0.5 * 1400/nrow(mBC@meta.data),
+                     no.legend=FALSE) +
+                     theme(axis.title.x = element_text(size=10, family = "Arial"),
+                     axis.title.y = element_text(size=10, family = "Arial"),
+                     axis.text.x = element_text(size=10, colour = 1, family = "Arial"),
+                     axis.text.y = element_text(size = 10, colour = 1, family = "Arial")) +
+                     theme(panel.border = element_rect(fill = NA, size = 1.0))
+p_legend <- cowplot::get_legend(p)
+} else if (mBC@version >= "3.0"){
+  p = DimPlot(object = mBC, reduction = "umap", 
+              group.by = resolution1[as.numeric(which(silhouette_score == max(silhouette_score)))],
+              label.size = 4,label=TRUE, combine = FALSE, pt.size = min(0.5 * 1400/nrow(mBC@meta.data), 1), raster=FALSE)
+    p = lapply(X = p, FUN=function(x){x + 
+                     theme(axis.title.x = element_text(size=8, family = "Arial"),
+                     axis.title.y = element_text(size=8, family = "Arial"),
+                     axis.text.x = element_text(size=8, colour = 1, family = "Arial"),
+                     axis.text.y = element_text(size = 8, colour = 1, family = "Arial"),
+                     plot.title = element_text(size = 8), legend.text = element_text(size=8))})
+  p = CombinePlots(p)
+  p_legend <- cowplot::get_legend(p)
+}
+if(Ncluster[as.numeric(which(silhouette_score == max(silhouette_score)))] <= 104){
+p = p + theme_classic() + scale_color_manual(values = custom_colors$discrete, labels=levels(mBC@active.ident)) +  
+        ggtitle(resolution1[as.numeric(which(silhouette_score == max(silhouette_score)))]) +
+        theme(plot.title=element_text(hjust = 0.5, size=8), legend.position = 'none') 
+} else {
+  p = p + theme_classic() +  
+        ggtitle(resolution1[as.numeric(which(silhouette_score == max(silhouette_score)))]) +
+        theme(plot.title=element_text(hjust = 0.5, size=8), legend.position = 'none') 
+}
+
+dimReduc_plot_UMAP[[8]]=p
+dimReduc_plot_legend_UMAP[[8]]=p_legend
+
+file.name=paste(dir.name.plot1, sample_name, "_UMAP", 
+                "_resolution", resolution[as.numeric(which(silhouette_score == max(silhouette_score)))],
+                "_large.png", sep='')
+ggsave(file = file.name, 
+       plot = dimReduc_plot_UMAP[[8]],
+       device="png", units="in", dpi = 300,
+       width = 4, height = 4, limitsize=FALSE)
+
+for (i in c(1:6)){
+  if (mBC@version == "2.3.4"){
+p = DimPlot(object = mBC, reduction.use = "FItSNE", group.by = tmp[i],do.label = TRUE,label.size = 4,
+                     do.return = TRUE, vector.friendly = FALSE, pt.size = 0.5* 1400/nrow(mBC@meta.data),
+                     no.legend=FALSE) +
+                     theme(axis.title.x = element_text(size=10, family = "Arial"),
+                     axis.title.y = element_text(size=10, family = "Arial"),
+                     axis.text.x = element_text(size=10, colour = 1, family = "Arial"),
+                     axis.text.y = element_text(size = 10, colour = 1, family = "Arial"))
+p_legend <- cowplot::get_legend(p)
+} else if (mBC@version >= 3.0){
+  p = DimPlot(object = mBC, reduction = "FItSNE", group.by = tmp[i],label.size = 3,label = TRUE,
+                     combine = FALSE, pt.size = min(0.5 * 1400/nrow(mBC@meta.data), 1), raster=FALSE)
+  p = lapply(X = p, FUN=function(x){x + 
+                     theme(axis.title.x = element_text(size=8, family = "Arial"),
+                     axis.title.y = element_text(size=8, family = "Arial"),
+                     axis.text.x = element_text(size=8, colour = 1, family = "Arial"),
+                     axis.text.y = element_text(size = 8, colour = 1, family = "Arial"),
+                     plot.title = element_text(size = 8), legend.text = element_text(size=8))})
+  p = CombinePlots(p)
+  p_legend <- cowplot::get_legend(p)
+} 
+  
+if(Ncluster[i] <= 104){
+p = p + theme_classic() + scale_color_manual(values = custom_colors$discrete, labels=levels(mBC@meta.data[,tmp[i]]))  +  
+        ggtitle(paste(tmp1[i], sep="")) +
+        theme(plot.title=element_text(hjust = 0.5, size=8), legend.position = 'none') 
+} else {
+  p = p + theme_classic() +  
+        ggtitle(paste(tmp1[i], sep="")) +
+        theme(plot.title=element_text(hjust = 0.5, size=8), legend.position = 'none') 
+}
+dimReduc_plot[[i+1]]=p
+dimReduc_plot_legend[[i+1]]=p_legend
+}
+
+#UMAP plot
+for (i in c(1:6)){
+  if (mBC@version == "2.3.4"){
+  p = DimPlot(object = mBC, reduction.use = "umap", group.by = tmp[i],do.label = TRUE,label.size = 4,
+                     do.return = TRUE, vector.friendly = FALSE, pt.size = 0.5* 1400/nrow(mBC@meta.data),
+                     no.legend=FALSE) +
+                     theme(axis.title.x = element_text(size=10, family = "Arial"),
+                     axis.title.y = element_text(size=10, family = "Arial"),
+                     axis.text.x = element_text(size=10, colour = 1, family = "Arial"),
+                     axis.text.y = element_text(size = 10, colour = 1, family = "Arial"))
+  p_legend <- cowplot::get_legend(p)
+  } else if (mBC@version >= "3.0"){
+  p = DimPlot(object = mBC, reduction = "umap", group.by = tmp[i],label.size = 3,label = TRUE,
+                     combine = FALSE, pt.size = min(0.5 * 1400/nrow(mBC@meta.data), 1), raster=FALSE)
+  p = lapply(X = p, FUN=function(x){x + 
+                     theme(axis.title.x = element_text(size=8, family = "Arial"),
+                     axis.title.y = element_text(size=8, family = "Arial"),
+                     axis.text.x = element_text(size=8, colour = 1, family = "Arial"),
+                     axis.text.y = element_text(size = 8, colour = 1, family = "Arial"),
+                     plot.title = element_text(size = 8), legend.text = element_text(size=8))})
+  p = CombinePlots(p)
+  p_legend <- cowplot::get_legend(p)
+  }
+  
+ if(Ncluster[i] < 105){
+  p = p + theme_classic() + scale_color_manual(values = custom_colors$discrete, labels=levels(mBC@meta.data[,tmp[i]]))  +  
+        ggtitle(paste(tmp1[i], sep="")) +
+        theme(plot.title=element_text(hjust = 0.5, size=8), legend.position = 'none') 
+ } else {
+  p = p + theme_classic() +  
+        ggtitle(paste(tmp1[i], sep="")) +
+        theme(plot.title=element_text(hjust = 0.5, size=8), legend.position = 'none') 
+  }
+dimReduc_plot_UMAP[[i+1]]=p
+dimReduc_plot_legend_UMAP[[i+1]]=p_legend
+}
+
+
+# save clustering & FIt-SNE result
+
+for (i in c(2:7)){
+file.name=paste(dir.name.plot1, sample_name, "_FItSNE_perplex", perplexity, 
+                "_resolution", names(silhouette_score[i-1]), ".png", sep='')
+save_plot(file = file.name, plot_grid(dimReduc_plot[[1]], dimReduc_plot_legend[[1]], 
+                                      dimReduc_plot[[i]], 
+                                      dimReduc_plot_legend[[i]], 
+                                      ncol=2, nrow=2, rel_widths = c(.6, .4)), device="png",
+          units="in", dpi = 300, base_width = 5, base_height = 6, limitsize=FALSE)
+}
+
+
+# save clustering & UMAP result
+
+for (i in c(2:7)){
+file.name=paste(dir.name.plot1, sample_name, "_UMAP", 
+                "_resolution", names(silhouette_score[i-1]), ".png", sep='')
+save_plot(file = file.name, plot_grid(dimReduc_plot_UMAP[[1]], dimReduc_plot_legend_UMAP[[1]],  
+                                      dimReduc_plot_UMAP[[i]], 
+                                      dimReduc_plot_legend_UMAP[[i]], 
+                                      ncol=2, nrow=2, rel_widths = c(.6, .4)), device="png",
+          units="in", dpi = 300, base_width = 5, base_height = 6, limitsize=FALSE)
+}
+
+file.name.Seurat=paste(dir.name, "/Seurat/", sample_name, "_Seurat.qs", sep='')
+qsave(mBC, file=file.name.Seurat, nthreads = 64)
+
+#highlight each origin of cells
+tmp = as.character(sort(unique(mBC@meta.data$orig.ident)))
+dir.name.plot.origins=paste(dir.name.plot1, sample_name, "_SampleOrigin/", sep='')
+if(!dir.exists(dir.name.plot.origins)){
+dir.create(dir.name.plot.origins)
+}
+
+highlighted_plot=list()
+if (mBC@version == "2.3.4"){
+for (i in c(1:length(tmp))) {
+  file.name = sprintf("%s_FItSNE.png", tmp[i])
+  file.name = paste(dir.name.plot.origins, file.name, sep='')
+  cols = rep("red", length(tmp))
+  cols[-i] = color=rgb(0.3,0.3,0.3,alpha=0)
+  p = DimPlot(object = mBC, group.by = "orig.ident", reduction.use = "FItSNE", 
+              do.return = TRUE, pt.size = 0.3 * 800/nrow(mBC@meta.data), cols.use=cols, main=tmp[i])
+  p = p + theme_classic() + 
+          theme(text=element_text(size=8), legend.position = 'none')+
+          ggtitle(paste(tmp[i], sep="")) +
+          theme(plot.title=element_text(hjust = 0.5), text=element_text(size=8))  
+  highlighted_plot[[i]]=p
+  names(hoghlighted_plot[[i]])=file.name
+  ggsave(file = file.name, plot = p, device="png", units="in", dpi = 300,
+       width = 4, height = 4, limitsize=FALSE)
+}
+} else if  (mBC@version >= "3.0"){
+   file.name = "separateByCondition_FItSNE.png"
+  file.name = paste(dir.name.plot.origins, file.name, sep='')
+  p = DimPlot(object = mBC, split.by = "orig.ident", reduction = "FItSNE", label = TRUE, label.size=3,
+              ncol=5, combine=FALSE, pt.size = 0.3 * 800/nrow(mBC@meta.data)) 
+  p = lapply(X = p, FUN=function(x){x + 
+                     theme(axis.title.x = element_text(size=8, family = "Arial"),
+                     axis.title.y = element_text(size=8, family = "Arial"),
+                     axis.text.x = element_text(size=8, colour = 1, family = "Arial"),
+                     axis.text.y = element_text(size = 8, colour = 1, family = "Arial"),
+                     plot.title = element_text(size = 8), legend.text = element_text(size=8))})
+  p = CombinePlots(p)
+  p = p + ggtitle("separate by conditions") +
+      theme(plot.title=element_text(hjust = 0.5, size=8), legend.position = 'none') 
+  if(Ncluster[as.numeric(which(silhouette_score == max(silhouette_score)))] < 105){
+  p = p + scale_color_manual(values = custom_colors$discrete, labels=levels(mBC@active.ident)) 
+  } 
+  highlighted_plot[[1]]=p
+    names(highlighted_plot)[1]=file.name
+  ggsave(file = file.name, plot = p, device="png", units="in", dpi = 300,
+       width = 10, height = ceiling(length(tmp)/5)*3, limitsize=FALSE)
+
+  
+}
+
+quiet(gc())
+  
+highlighted_plot_UMAP = list()
+if (mBC@version == "2.3.4"){
+for (i in c(1:length(tmp))) {
+  file.name = sprintf("%s_UMAP.png", tmp[i])
+  file.name = paste(dir.name.plot.origins, file.name, sep='')
+  cols = rep("red", length(tmp))
+  cols[-i] = color=rgb(0.3,0.3,0.3,alpha=0)
+  p = DimPlot(object = mBC, group.by = "orig.ident", reduction.use = "umap", 
+              do.return = TRUE, pt.size = 0.3 * 800/nrow(mBC@meta.data), cols.use=cols, main=tmp[i])
+  p = p + theme_classic() + 
+          theme(text=element_text(size=8), legend.position = 'none')+
+          ggtitle(paste(tmp[i], sep="")) +
+          theme(plot.title=element_text(hjust = 0.5), text=element_text(size=8))  
+  highlighted_plot_UMAP[[i]]=p
+  names(hoghlighted_plot_UMAP[[i]])=file.name
+  ggsave(file = file.name, plot = p, device="png", units="in", dpi = 300,
+       width = 4, height = 4, limitsize=FALSE)
+} 
+} else if  (mBC@version >= "3.0"){
+    file.name = "separateByCondition_UMAP.png"
+  file.name = paste(dir.name.plot.origins, file.name, sep='')
+  p = DimPlot(object = mBC, split.by = "orig.ident", reduction = "umap", label = TRUE, label.size=3,
+              ncol=5, combine = FALSE, pt.size = 0.3 * 800/nrow(mBC@meta.data)) 
+  p = lapply(X = p, FUN=function(x){x + 
+                     theme(axis.title.x = element_text(size=8, family = "Arial"),
+                     axis.title.y = element_text(size=8, family = "Arial"),
+                     axis.text.x = element_text(size=8, colour = 1, family = "Arial"),
+                     axis.text.y = element_text(size = 8, colour = 1, family = "Arial"),
+                     plot.title = element_text(size = 8), legend.text = element_text(size=8))})
+  p = CombinePlots(p)
+  p = p + ggtitle("separate by conditions") +
+      theme(plot.title=element_text(hjust = 0.5, size=8), legend.position = 'none') 
+  if(Ncluster[as.numeric(which(silhouette_score == max(silhouette_score)))] < 105){
+  p = p + scale_color_manual(values = custom_colors$discrete, labels=levels(mBC@active.ident)) 
+  } 
+  highlighted_plot_UMAP[[1]]=p
+    names(highlighted_plot_UMAP)[1]=file.name
+  ggsave(file = file.name, plot = p, device="png", units="in", dpi = 300,
+       width = 10, height = ceiling(length(tmp)/5)*3, limitsize=FALSE)
+}
+quiet(gc())  
+
+resolution_optim = tmp1[which(silhouette_score == max(silhouette_score))]
+
+
+```
+
+## Seurat clustering silhouette score plot
+
+We assumed that `r paste(resolution_optim, sep="")` was optimal because mean silhouette score of `r paste(resolution_optim, sep="")` was maximal among calculated resolutions.
+
+Figure 4. Mean silhouette scores of clustering in each resolution parameters.
+
+```{r Seurat_silhouette, echo=FALSE, cache=FALSE, fig.width=6, fig.height=4.5, dpi=300, out.width = 600, out.height = 450, fig.align='center'}
+plot_grid(p_silhouette)
+ quiet(dev.off())
+```
+
+## Seurat clustering visualization by FIt-SNE plot  {.tabset .tabset-fade}
+
+We use python implementation of FIt-SNE 1.1.1 (George C. Linderman et al Nat Methods 2019) through reticulate package in `r paste(version$version.string, sep="")` for visualizaiton of clustering result, because it is better than commonly-used UMAP method in terms of calculation speed and visualization. FIt-SNE parameters are as follows: `r paste("perplexity=", perplexity, " df=0.9", sep="")`. Tag assignment and Clustering results of each resolution parameters were shown separately in tabs.
+
+Figure 5. FIt-SNE visualization of Seurat clustering result
+
+### optimal clustering result
+
+```{r Seurat_plot_DR, echo=FALSE, cache=FALSE, fig.width=5, fig.height=5, dpi=300, out.width = 500, out.height = 500, fig.align='center'}
+plot_grid(dimReduc_plot[[8]])
+  quiet(dev.off())
+  quiet(gc())
+  Sys.sleep(5)
+
+```
+
+### by Tags-1
+
+```{r Seurat_plot_DR1, echo=FALSE, cache=FALSE, fig.width=8, fig.height=5, dpi=300, out.width = 800, out.height = 500, fig.align='center'}
+plot_grid(dimReduc_plot[[1]], dimReduc_plot_legend[[1]])
+  quiet(dev.off())
+  quiet(gc())
+  Sys.sleep(5)
+
+```
+
+### by Tags-2
+
+
+```{r Seurat_plot_DR7_0_1, echo=FALSE, cache=FALSE, fig.width=10, fig.height=ceiling(length(tmp)/5)*2, dpi=300, out.width = 1000, out.height = ceiling(length(tmp)/5)*200, fig.align='center'}
+
+if (mBC@version == "2.3.4"){
+plot_grid(plotlist=highlighted_plot, ncol = 3)
+} else if  (mBC@version >= "3.0"){
+plot_grid(highlighted_plot[[1]])
+}
+  quiet(dev.off())
+  quiet(gc())
+  Sys.sleep(5)
+
+```
+
+### by resolutions
+
+```{r Seurat_plot_DR2, echo=FALSE, cache=FALSE, fig.width=6, fig.height=5, dpi=300, out.width = 900, out.height = 550, fig.align='center'}
+plot_grid(dimReduc_plot[[2]], dimReduc_plot[[3]], dimReduc_plot[[4]],
+          dimReduc_plot[[5]], dimReduc_plot[[6]], dimReduc_plot[[7]], ncol=3)
+  quiet(dev.off())
+  quiet(gc())
+  Sys.sleep(5)
+```
+
+
+## Seurat clustering visualization by UMAP plot  {.tabset .tabset-fade}
+
+Figure 5. UMAP visualization of Seurat clustering result
+
+### optimal clustering result
+
+```{r Seurat_plot_DRX, echo=FALSE, cache=FALSE, fig.width=5, fig.height=5, dpi=300, out.width = 500, out.height = 500, fig.align='center'}
+plot_grid(dimReduc_plot_UMAP[[8]])
+  quiet(dev.off())
+  quiet(gc())
+  Sys.sleep(5)
+```
+
+### by Tags-1
+
+```{r Seurat_plot_DR3, echo=FALSE, cache=FALSE, fig.width=8, fig.height=5, dpi=300, out.width = 800, out.height = 500, fig.align='center'}
+plot_grid(dimReduc_plot_UMAP[[1]], dimReduc_plot_legend_UMAP[[1]])
+  quiet(dev.off())
+  quiet(gc())
+  Sys.sleep(5)
+```
+
+### by Tags-2
+
+
+```{r Seurat_plot_DR7_1_1, echo=FALSE, cache=FALSE,  fig.width=10, fig.height=ceiling(length(tmp)/5)*2, dpi=300, out.width = 1000, out.height = ceiling(length(tmp)/5)*200, fig.align='center'}
+if (mBC@version == "2.3.4"){
+plot_grid(plotlist=highlighted_plot_UMAP, ncol = 3)
+} else if  (mBC@version >= "3.0"){
+  plot_grid(highlighted_plot_UMAP[[1]])
+}
+  quiet(dev.off())
+  quiet(gc())
+  Sys.sleep(5)
+```
+
+### by resolutions
+
+```{r Seurat_plot_DR5, echo=FALSE, cache=FALSE, fig.width=6, fig.height=5, dpi=300, out.width = 1200, out.height = 700, fig.align='center'}
+plot_grid(dimReduc_plot_UMAP[[2]], dimReduc_plot_UMAP[[3]], dimReduc_plot_UMAP[[4]],
+          dimReduc_plot_UMAP[[5]], dimReduc_plot_UMAP[[6]], dimReduc_plot_UMAP[[7]], ncol=3)
+ quiet(dev.off())
+```
+
+File locations  
+
+Original plot files were stored at `r paste(dir.name.plot1, sep="")`.  
+Entire Seurat object file was stored at `r paste(file.name.Seurat, sep="")`.
+
+---
+
+## Cell composition analysis
+
+```{r Seurat_cell_number, echo=FALSE, cache=FALSE}
+quiet(gc())
+setwd("../") #must set working directory. default is .Rmd-existing path.
+message(paste("Perform cell compositon analysis..."))
+
+if (mBC@version == "2.3.4"){
+tmp = table(mBC@ident, mBC@meta.data$orig.ident)
+} else if (mBC@version >= "3.0"){
+tmp = table(mBC@active.ident, mBC@meta.data$orig.ident)
+}
+
+tmp = as.data.frame(tmp)
+
+tmp1 = tmp %>% tidyr::spread(key = Var2, value=Freq) 
+colnames(tmp1)[1]="Seurat_Clusters"
+hoge = c("doublet", "not-detected", "not")
+tmp1 = tmp1[,!colnames(tmp1) %in% hoge]
+
+file.name_table=paste(dir.name.table, sample_name, "_subsetNumber.txt", sep='')
+write.table(x = tmp1, file = file.name_table, row.names=F, sep="\t", quote=F)
+tmp_cellcount = tmp1
+
+rownames(tmp1) = tmp1[,1]
+tmp1 = tmp1[,2:ncol(tmp1)]
+
+#cell composition analysis, calculate % of total
+rownames(tmp_cellcount)=tmp_cellcount[,1]
+tmp_cellcount = tmp_cellcount[,2:ncol(tmp_cellcount), drop=F]
+nf = 1/colSums(tmp_cellcount)            
+tmp_cellcount = sweep(tmp_cellcount, 2, nf, "*") 
+
+temp_labels <- mBC@meta.data %>%
+  group_by(orig.ident) %>%
+  tally()
+
+
+if (mBC@version == "2.3.4"){
+tmp2 = tmp_cellcount %>% tibble::rownames_to_column() %>%
+  reshape2::melt(id.vars = 'rowname') %>% 
+  mutate(rowname = factor(rowname, levels = levels(mBC@ident)))
+
+} else if (mBC@version >= "3.0"){
+  tmp2 = tmp_cellcount %>% tibble::rownames_to_column() %>%
+  reshape2::melt(id.vars = 'rowname') %>% 
+  mutate(rowname = factor(rowname, levels = levels(mBC@active.ident)))
+}
+
+
+colnames(tmp2)[1:2]=c("Seurat_clusters", "Sample")
+
+p_PercentOfTotal = tmp2 %>%
+  ggplot(aes(Sample, value)) +
+  geom_bar(aes(fill = Seurat_clusters), position = 'fill', stat = 'identity') +
+  scale_fill_manual(name = 'Seurat_clusters', values = custom_colors$discrete) +
+  scale_y_continuous(name = '% of total cells', labels = scales::percent_format(), expand = c(0.01,0)) +
+  theme_classic() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    text = element_text(size = 10),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.title.x = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)
+  )
+file.name_PercentOfTotal=paste(dir.name.plot1, sample_name, "_cell_PercentOfTotal.png", sep='')
+ggsave(file = file.name_PercentOfTotal, plot = p_PercentOfTotal, device="png", units="in", dpi = 300,
+      width = max(6, ceiling(ncol(tmp_cellcount)/40) *8), height = 8, limitsize=FALSE)
+
+
+# cell composition clustering
+if(length(fnames)>1){
+data2 = t(scale(t(tmp_cellcount), center = TRUE)) 
+data2=data2[is.na(rownames(data2)) == FALSE,,drop=F]
+data2[is.nan(data2)] = 0
+
+if(nrow(data2)>2){
+data3 = factoextra::fviz_nbclust(data2, hclust_pearson_fast,
+                                       method="silhouette",
+                                       k.max=nrow(data2)-1)
+}
+m2b2g = colorRampPalette(c("blue","cyan","white","magenta", "red"))
+
+#hierarchical clustering by row(cell clusters) more than 3 clusters
+if(nrow(data2)>1){
+data3 = data3$data$y[2:length(data3$data$y)]
+clusterNb=which.max(data3)+1
+} else {
+clusterNb = 2
+}
+clustering = pheatmap(
+  data2, 
+  scale="none", 
+  cutree_rows=clusterNb,
+  clustering_distance_rows = "correlation",
+  clustering_method="ward.D",
+  silent=TRUE
+)
+clusters = cutree(clustering$tree_row, k = clusterNb)
+cluster_annot = data.frame(clusters)
+cluster_annot[,1] = as.character(cluster_annot[,1])
+colnames(cluster_annot) = "cell_Clusters"
+cluster_annot$Seurat_clusters = rownames(tmp1)
+
+#specify cluster colors
+if (mBC@version == "2.3.4"){
+cluster_colors = custom_colors$discrete[1:length(unique(mBC@ident))]
+names(cluster_colors) = 0:(length(unique(mBC@ident))-1)
+
+} else if (mBC@version >= "3.0"){
+cluster_colors = custom_colors$discrete[1:length(unique(mBC@active.ident))]
+names(cluster_colors) = 0:(length(unique(mBC@active.ident))-1)
+}
+
+
+annotation_row = cluster_annot
+rownames(annotation_row) = rownames(tmp1)
+
+annotation_colors = list(
+  Seurat_clusters=cluster_colors
+)
+palettelength=1024
+myBreaks = c(seq(min(data2), 0, length.out=ceiling(palettelength/2)+1),
+             seq(max(data2)/palettelength, max(data2), length.out=floor(palettelength/2)))
+
+
+#draw heatmap, scale:Z-score
+p_cellcomposition = pheatmap(
+  data2, 
+  scale="none", 
+  cluster_cols=FALSE, 
+  show_colnames=TRUE, 
+  show_rownames=TRUE, 
+  cutree_rows=clusterNb, 
+  clustering_distance_rows = "correlation",
+  clustering_method="ward.D",
+  annotation_row=annotation_row,
+  annotation_colors = annotation_colors,
+  annotation_names_row=TRUE,
+  border_color = NA,
+  color=m2b2g(1024),
+  silent=TRUE,
+  breaks = myBreaks
+)
+p_cellcomposition = as.ggplot(p_cellcomposition[[4]])
+file.name_cellComp_zscore=paste(dir.name.plot1, 
+                                      sample_name, "_cellCompositon_zscore.png", sep='')
+ggsave(file = file.name_cellComp_zscore, plot = p_cellcomposition, 
+       device="png", units="in", dpi = 300,
+       width = max(6, ceiling(ncol(tmp_cellcount)/40) *8), height = 10, limitsize=FALSE)
+
+quiet(gc())
+}
+
+evaluate=length(fnames)>1
+silhouette_tmp1 = c("resolution 1.0", "resolution 1.5", "resolution 2", "resolution 2.5", "resolution 3", "resolution 3.5")
+
+```
+
+Cell number of each cluster/Tags in `r paste(resolution_optim, sep="")`.  
+Rownames means the cluster IDs of Seurat analysis.  
+
+```{r output_table3, echo=FALSE, cache=FALSE,dpi=300, out.width = 1000, out.height = 800, fig.align='center'}
+
+colnames(tmp_cellcount) = gsub(sample_name, "", colnames(tmp_cellcount))
+tmp1 = cbind(rownames(tmp1), tmp1)
+colnames(tmp1)[1]="Seurat_clusters"
+DT::datatable(tmp1, filter="none", rownames = FALSE, width='100%',
+          caption = 'Table 2. The number of cells in each cluster in each Tag IDs.', 
+          class = 'cell-border stripe', 
+          options = list(pageLength=10, searching=FALSE, lengthChange=FALSE, autoWidth = TRUE, scrollX=F)) %>%
+   DT::formatStyle(columns = c(1:(ncol(tmp_cellcount)+1)), fontSize = 8)
+```
+
+Original data is stored at `r paste(file.name_table, sep="")`.
+
+### Changes of cell composition between samples {.tabset .tabset-fade}
+
+We calculate % of total cells of each Seurat cluster in each sample.  
+Then, the cell compositions of each cluster were z-scaled, clustered based on Pearson's correlation coefficient by using hclust (Ward method), and visualized by pheatmap package in `r paste(version$version.string, sep="")`. Number of clusters was determined by maxima of Silhouette score.
+
+Figure 6. Changes of % of total cells and cell compositon clustering
+
+#### % of total
+
+
+```{r Seurat_cellcomposition_percent, echo=FALSE, cache=FALSE, fig.width=max(6, ceiling(ncol(tmp_cellcount)/40) *6), fig.height=6, dpi=300, out.width = max(600, ceiling(ncol(tmp_cellcount)/40) *600), out.height = 600, fig.align='center'}
+plot_grid(p_PercentOfTotal)
+ quiet(dev.off())
+   quiet(gc())
+  Sys.sleep(5)
+
+```
+
+`r if(length(fnames)>1){paste("#### Cell composition clustering")}`
+
+```{r Seurat_cellcomposition_clustering, echo=FALSE, cache=FALSE, fig.width=max(6, ceiling(ncol(tmp_cellcount)/40) *6), fig.height=8, dpi=300, out.width = max(600, ceiling(ncol(tmp_cellcount)/40) *600), out.height = 800, fig.align='center'}
+plot_grid(p_cellcomposition)
+ quiet(dev.off())
+   quiet(gc())
+  Sys.sleep(5)
+```
+
+
+Original data is stored at `r paste(file.name_PercentOfTotal, sep="")`  
+`r if(length(fnames)>1){paste("and", file.name_cellComp_zscore, sep="")}`
+---
+
+## Find out marker genes in each cell cluster
+
+Next, we find out marker genes in each cell cluster defined in `r paste(resolution_optim, sep="")` in parallel by using parallelized version of FindAllMarkers function in Seurat (test method = wilcox, minimum expression in each cluster >= 20%, only.pos=TRUE).
+
+```{r Seurat_FindMarkers, echo=FALSE, cache=FALSE}
+setwd("../") #must set working directory. default is .Rmd-existing path.
+
+if (mBC@version == "2.3.4"){
+mBC.markers = rDBEC::FindMarkers_parallel_lite(mBC, AllcellsIdent=mBC@ident,
+                                        test.use="wilcox", only.pos=TRUE, min.pct=0.2,
+                                        features.use = NULL, nthreads = threads,
+                                        adj.p.val.threshold=0.05)
+
+} else if (mBC@version >= "3.0"){
+mBC.markers = rDBEC::FindMarkers_parallel_lite(mBC, AllcellsIdent=mBC@active.ident,
+                                        test.use="wilcox", only.pos=TRUE, min.pct=0.2,
+                                        features.use = NULL, nthreads = threads,
+                                        adj.p.val.threshold=0.05)
+
+}
+
+mBC.markers$cluster = as.numeric(mBC.markers$cluster)
+mBC.markers = mBC.markers %>% arrange(desc(avg_logFC))  %>% arrange(cluster)
+mBC.markers = as.data.frame(mBC.markers)
+
+quiet(gc())
+
+options(digits=3)
+mBC.markers = mBC.markers[,c(10, 9, 8, 2, 3,4, 6,7,1)]
+tmp1 = exp(mBC.markers$avg_logFC)
+tmp1 = log2(tmp1)
+mBC.markers$avg_logFC = tmp1
+mBC.markers$avg_logFC = round(mBC.markers$avg_logFC, digits = 3)
+mBC.markers$within_avg_exp = round(mBC.markers$within_avg_exp, digits = 3)
+mBC.markers$without_avg_exp = round(mBC.markers$without_avg_exp, digits = 3)
+mBC.markers$p_val_adj = mBC.markers$p_val_adj
+mBC.markers$p_val = mBC.markers$p_val
+
+mBC.markers_write = mBC.markers
+mBC.markers_write$cluster=paste("cluster", mBC.markers_write$cluster, sep="")
+
+file.name.marker.table=paste(dir.name.table, sample_name, "_ALLmarkers_minpct0.2_Adj_p0.05.txt", sep='')
+fwrite(x=mBC.markers_write, file = file.name.marker.table, row.names=F, col.names=T, sep="\t", quote=F)
+
+markerGene.number = length(unique(mBC.markers$gene))
+
+top20 = mBC.markers %>% group_by(cluster) %>% top_n(20, avg_logFC)
+top20 = as.data.frame(top20)
+top20  = top20 [!duplicated(top20$gene),]
+top20 = top20 %>% arrange(desc(avg_logFC))  %>% arrange(cluster)
+top20 = as.data.frame(top20)
+
+file.name.heatmap=paste(dir.name.plot1, sample_name, "_markers_heatmap.png", sep='')
+p_heatmap = DoHeatmap2(object = mBC, genes.use = top20$gene, genes.ident = top20$cluster, 
+               slim.col.label = TRUE, remove.key = FALSE, cex.row=3, disp.min = -2.5, disp.max = 2.5)
+if (mBC@version == "2.3.4"){
+ggsave(file = file.name.heatmap, plot = p_heatmap, device="png", units="in", dpi = 300,
+       width = max(10, nrow(mBC@meta.data)/30000*15), 
+       height = max(5, ceiling(length(unique(mBC@ident))/1.5)), limitsize=FALSE)
+
+} else if (mBC@version >= "3.0"){
+ggsave(file = file.name.heatmap, plot = p_heatmap, device="png", units="in", dpi = 300,
+         width = max(10, nrow(mBC@meta.data)/30000*15), 
+       height = max(5, ceiling(length(unique(mBC@active.ident))/1.5)), limitsize=FALSE)
+}
+
+#file.name=paste(dir.name, "/Seurat/", sample_name, "_Seurat_markers.rda", sep='')
+#save.pigz(mBC.markers, file=file.name, n.cores=24)
+
+quiet(gc())
+
+
+```
+
+Total `r paste(markerGene.number, sep="")` marker genes were identified (minimum rate of expressed cells within cluster > 0.2, p<0.05 by Bonferroni correction). 
+
+Figure 7. Heatmap of fold-change top20 marker genes in each cluster
+
+```{r Seurat_plot_heatmap, echo=FALSE, cache=FALSE, fig.width=12, fig.height=12, dpi=200, out.width = 900, out.height = 900, fig.align='center'}
+plot_grid(p_heatmap)
+   quiet(dev.off())
+  quiet(gc())
+  Sys.sleep(5)
+```
+
+All marker gene table.  
+
+gene : Marker gene in a cluster  
+cluster : Seurat cluster  
+within_avg_exp : Average expression (ln) in a cluster  
+without_avg_exp : Average expression (ln) in all the other cells except a cluster  
+pct.1 : percentage of expressed cells within a cluster  
+pct.2 : percentage of expressed cells all of the other clusters  
+logFC : log2 fold-change between average expression in a cluster and in all the other clusters.   
+p_val_adj : Bonferroni-corrected p value of DE test results 
+p_val : p value of DE test results
+
+Table 3. All of the detected marker genes of each cluster.
+
+```{r output_table4, echo=FALSE, cache=FALSE, dpi=300, out.width = 1000, out.height = 700, fig.align='center'}
+DT::datatable(mBC.markers_write, filter="none", rownames = F, width='100%',
+          class = 'cell-border stripe', extensions ='FixedColumns',
+          options = list(pageLength=15, fixedColumns = list(leftColumns = 2))) %>%
+   DT::formatStyle(columns = c(1:ncol(mBC.markers)), fontSize = 8)
+```
+
+Marker gene heatmap is stored at `r paste(file.name.heatmap, sep="")`, and marker gene table is stored at `r paste(file.name.marker.table, sep="")`.
+
+---
+
+```{r Seurat_MarkerPlots, echo=FALSE, cache=FALSE}
+
+
+setwd("../") #must set working directory. default is .Rmd-existing path.
+options(future.globals.maxSize= 100000000*1024^3)
+dir.name.plot.markers.2D_FItSNE=paste(dir.name.plot1, sample_name, "_GenePlots_scatter_FItSNE/", sep='')
+if(!dir.exists(dir.name.plot.markers.2D_FItSNE)){
+dir.create(dir.name.plot.markers.2D_FItSNE)
+}
+
+data.use=mBC@assays$RNA@data
+data.use=data.use[rowSums(data.use)>0,]
+tmp = rownames(data.use)
+
+message("plot expression pattern of all marker genes on FIt-SNE plot...")
+FeaturePlot2(object = mBC, features.plot = tmp, cols.use = c("grey", "red"),threads = 12,
+                reduction.use = "FItSNE", no.legend = TRUE, data.use = data.use,
+                pt.size = min(0.6*10000/nrow(mBC@meta.data), 1),
+                do.return=FALSE, min.cutoff = "q10",
+                plot.save = TRUE, dir.save = dir.name.plot.markers.2D_FItSNE)
+
+quiet(gc())
+
+dir.name.plot.markers.2D_UMAP=paste(dir.name.plot1, sample_name, "_GenePlots_scatter_UMAP/", sep='')
+if(!dir.exists(dir.name.plot.markers.2D_UMAP)){
+dir.create(dir.name.plot.markers.2D_UMAP)
+}
+
+
+data.use=mBC@assays$RNA@data
+data.use=data.use[rowSums(data.use)>0,]
+tmp = rownames(data.use)
+
+
+message("plot expression pattern of all marker genes on UMAP plot...")
+FeaturePlot2(object = mBC, features.plot = tmp, cols.use = c("grey", "red"),threads = 12,
+                reduction.use = "umap", no.legend = TRUE, data.use = data.use,
+                pt.size = min(0.6*10000/nrow(mBC@meta.data), 1),
+                do.return=FALSE,  min.cutoff = "q10", 
+                plot.save = TRUE, dir.save = dir.name.plot.markers.2D_UMAP)
+
+quiet(gc())
+
+top6 = mBC.markers %>% group_by(cluster) %>% top_n(6, avg_logFC)
+top6 = as.data.frame(top6)
+top6  = top6 [!duplicated(top6$gene),]
+top6 = top6 %>% arrange(desc(avg_logFC))  %>% arrange(cluster)
+top6 = as.data.frame(top6)
+
+clusters = sort(unique(top6$cluster))
+res_plot_FItSNE=list()
+res_plot_UMAP = list()
+
+for (i in c(1:length(clusters))){
+tmp = top6[top6$cluster == clusters[i],]
+tmp = tmp$gene
+res_plot1 = FeaturePlot2(object = mBC, features.plot=tmp,  min.cutoff = "q10",data.use = data.use,
+                         cols.use = c("grey", "red"),do.par = F, reduction.use = "FItSNE", 
+                         no.legend = TRUE, pt.size = min(0.3 * 10000/nrow(mBC@meta.data), 1),
+                         do.return=TRUE, plot.save = FALSE)
+res_plot2 = FeaturePlot2(object = mBC, features.plot=tmp, min.cutoff = "q10",data.use = data.use,
+                         cols.use = c("grey", "red"),do.par = F, reduction.use = "umap", 
+                         no.legend = TRUE, pt.size = min(0.3 * 10000/nrow(mBC@meta.data), 1),
+                         do.return=TRUE, plot.save = FALSE)
+res_plot_FItSNE[[i]]=plot_grid(plotlist=res_plot1, ncol = 3)
+res_plot_UMAP[[i]]=plot_grid(plotlist=res_plot2, ncol = 3)
+}
+
+quiet(gc())
+
+
+message("plot expression pattern of all genes on Violin Plot...")
+
+dir.name.plot.markers.Violin=paste(dir.name.plot1, sample_name, "_GenePlots_Violin/", sep='')
+if(!dir.exists(dir.name.plot.markers.Violin)){
+dir.create(dir.name.plot.markers.Violin)
+}
+
+data.use=mBC@assays$RNA@data
+data.use=data.use[rowSums(data.use)>0,]
+tmp = rownames(data.use)
+data.use = t(data.use)
+VlnPlot2(object = mBC, features.plot = tmp, split.by = NULL, do.par = T, threads=12, plot.save=T, pt.size=0,
+          dir.save = dir.name.plot.markers.Violin, data.use = data.use)
+
+quiet(gc())
+
+quiet(gc())
+
+#res_plot_vln2=list()
+
+#for (i in c(1:length(clusters))){
+#tmp = top6[top6$cluster == clusters[i],]
+#tmp = tmp$gene
+#res_plot_vln1 = VlnPlot2(mBC, features.plot=tmp, split.by="orig.ident", threads=2, do.par=TRUE,
+#                         do.return=TRUE, plot.save=FALSE)
+#res_plot[[i]]=plot_grid(res_plot[[i]], plot_grid(plotlist=res_plot_vln1, ncol = 1), ncol=1,
+#                        rel_heights = c(.3, .7))
+#}
+
+#quiet(gc())
+  
+```
+
+
+## top6 Marker gene visualization in FIt-SNE plot  {.tabset .tabset-fade}
+
+Output file locations
+
+All gene scatter plots were stored at `r paste(dir.name.plot.markers.2D_FItSNE, sep="")`.  
+All gene Violin plots were stored at `r paste(dir.name.plot.markers.Violin, sep="")`.  
+
+```{r markergeneGenerate, echo=FALSE, cache=FALSE}
+out <- NULL
+
+for (i in 1:length(res_plot_FItSNE)) {
+  tmp = top6[top6$cluster == clusters[i],]
+  tmp = tmp$gene
+  if(length(tmp)>3){
+  tabName <- paste0("cluster",clusters[i])
+  tabSection <- paste0(
+    "\n### ", tabName, "\n",
+    "\n\n```{r, ", "FItSNE", i, ", echo=FALSE, cache=FALSE, fig.width=10, fig.height=6, dpi=300, out.width = 1000, out.height = 600, fig.align='center'}\n",
+    "plot_grid(res_plot_FItSNE[[", i, "]])\n",
+         "quiet(dev.off())\n",
+    "\n\n```\n\n"
+  )
+  } else {
+     tabName <- paste0("cluster",clusters[i])
+  tabSection <- paste0(
+    "\n### ", tabName, "\n",
+    "\n\n```{r, ", "FItSNE", i, ", echo=FALSE, cache=FALSE, fig.width=10, fig.height=3, dpi=300, out.width = 1000, out.height = 300, fig.align='center'}\n",
+    "plot_grid(res_plot_FItSNE[[", i, "]])\n",
+     "quiet(dev.off())\n",
+    "\n\n```\n\n"
+  ) 
+  }
+
+  out <- c(out, knit_expand(text=tabSection))
+}
+
+```
+
+`r paste(knit(text = out), collapse = '\n')`
+
+
+---  
+
+## top6 Marker gene visualization in UMAP plot  {.tabset .tabset-fade}
+
+Output file locations
+
+All gene scatter plots were stored at `r paste(dir.name.plot.markers.2D_UMAP, sep="")`.  
+
+Figure 9. Expression pattern of fold-change top6 marker genes in each cluster in UMAP plot
+
+```{r markergeneGenerate2, echo=FALSE, cache=FALSE}
+out1 <- NULL
+
+for (i in 1:length(res_plot_UMAP)) {
+  tmp = top6[top6$cluster == clusters[i],]
+  tmp = tmp$gene
+  if(length(tmp)>3){
+  tabName1 <- paste0("cluster",clusters[i])
+  tabSection1 <- paste0(
+    "\n### ", tabName1, "\n",
+    "\n\n```{r,", "UMAP", i, ", echo=FALSE, cache=FALSE, fig.width=10, fig.height=6, dpi=300, out.width = 1000, out.height = 600, fig.align='center'}\n",
+    "plot_grid(res_plot_UMAP[[", i, "]])\n",
+         "quiet(dev.off())\n",
+    "\n\n```\n\n"
+  )
+  } else {
+     tabName1 <- paste0("cluster",clusters[i])
+  tabSection1 <- paste0(
+    "\n### ", tabName1, "\n",
+    "\n\n```{r,", "UMAP", i, ", echo=FALSE, cache=FALSE, fig.width=10, fig.height=3, dpi=300, out.width = 1000, out.height = 300, fig.align='center'}\n",
+    "plot_grid(res_plot_UMAP[[", i, "]])\n",
+         "quiet(dev.off())\n",
+    "\n\n```\n\n"
+  ) 
+  }
+
+  out1 <- c(out1, knit_expand(text=tabSection1))
+}
+
+```
+
+`r paste(knit(text = out1), collapse = '\n')`  
+
+---
+
+
+## Gene Ontology analysis of marker genes {.tabset .tabset-fade}
+
+
+Next, we performed Gene Ontology (GO) analysis against identified marker genes of each cluster by using ClusterPlofiler package. GO terms were summarized by using simpify function in ClusterProlifer package (cutoff=0.7, by="p.adjust", select_fun=min). Identified significantly-enriched GO terms (Benjamini-Hochberg adjusted p<0.05, false discovery rate (qvalue)<0.1, GO level = 3-12, simplify=0.7) were visualized by enrichplot package.  
+We did not perform GO analysis of the clusters of which marker gene number was under 20.  
+
+```{r Seurat_GO, echo=FALSE, cache=FALSE}
+setwd("../") #must set working directory. default is .Rmd-existing path.
+
+suppressMessages(library(clusterProfiler))
+suppressMessages(library(org.Mm.eg.db))
+suppressMessages(library(org.Hs.eg.db))
+suppressMessages(library(org.Rn.eg.db))
+suppressMessages(library(enrichplot))
+suppressMessages(library(forcats))
+
+dir.name.GO = paste(dir.name.1, "/Seurat_GO/", sep="")
+if(!dir.exists(dir.name.GO)){
+dir.create(dir.name.GO)
+}
+
+threads = 12
+
+GO_enrich_analysis = function(geneList,
+                              species,
+                              keyNumber,
+                              cluster_name,
+                              out.plot.dir="./GO_out_plot/"){
+  
+  if(length(geneList[[keyNumber]])>20){
+  
+  if(species == "hsa"){
+    ego = try(clusterProfiler::enrichGO(gene = geneList[[keyNumber]], OrgDb = org.Hs.eg.db, keyType ="SYMBOL",
+                   ont  = "BP",  pAdjustMethod = "BH",
+                   pvalueCutoff  = 0.05, qvalueCutoff  = 0.1), silent = TRUE)
+  } else if (species == "mmu"){
+    ego = try(clusterProfiler::enrichGO(gene = geneList[[keyNumber]], OrgDb = org.Mm.eg.db, keyType ="SYMBOL",
+                   ont  = "BP",  pAdjustMethod = "BH",
+                   pvalueCutoff  = 0.05, qvalueCutoff  = 0.1), silent = TRUE)
+  } else if (species == "rat"){
+    ego = try(clusterProfiler::enrichGO(gene = geneList[[keyNumber]], OrgDb = org.Rn.eg.db, keyType ="SYMBOL",
+                   ont  = "BP",  pAdjustMethod = "BH",
+                   pvalueCutoff  = 0.05, qvalueCutoff  = 0.1), silent = TRUE)
+  }
+  if (class(ego) != "try-error" && class(ego) != "NULL") {
+
+   ego.frame=as.data.frame(ego)
+   if(nrow(ego.frame)>0){
+     ego = gofilter(x = ego, level = c(3:12))               #filter enriche GO terms
+        ego.frame=as.data.frame(ego)
+   }
+    
+
+   if(nrow(ego.frame)>=2){
+     ego = enrichplot::pairwise_termsim(ego, showCategory = nrow(ego.frame))
+     ego = try(simplify(ego, cutoff=0.7, by="p.adjust", select_fun=min), silent=TRUE)  #summarize GO terms
+     if (class(ego) != "try-error" && class(ego) != "NULL") {
+      ego.frame=as.data.frame(ego)
+      if(nrow(ego.frame)>=2){
+      p = enrichplot::emapplot(ego, node_label_size=0.65, cex_label_category=0.65)
+      file.name=paste(out.plot.dir, cluster_name[keyNumber], "_GOBP_enrichMap.png", sep='')
+      ggsave(file = file.name, plot = p, device="png", units="in", dpi = 300,
+         width = 8, height = 8, limitsize=FALSE)
+      ego.frame$Cluster=rep(cluster_name[keyNumber], nrow(ego.frame))
+      res = ego.frame
+      } else {
+      res = NA
+      p = NA
+      }
+     } else {
+      res = NA
+      p = NA
+     }
+   } else{
+     res=NA
+     p = NA
+   }
+  } else {
+    res=NA
+    p=NA
+  }
+ } else {
+    res=NA
+    p=NA
+  }
+ res1 = list()
+ res1[[1]]=res
+ res1[[2]]=p
+ return(res1)
+ }
+
+#GO analysis
+
+#create gene list for GO enrichment analysis
+
+geneList = list()
+cluster_list = sort(as.numeric(unique(as.character(mBC@active.ident))))
+for (j in c(1:length(unique(mBC@active.ident)))){
+  hoge = mBC.markers[mBC.markers$cluster %in% cluster_list[j],]
+  hoge = unique(hoge$gene)
+  geneList[[j]]=hoge
+}
+
+
+#perform GO enrichment analysis
+idents = sort(as.numeric(unique(as.character(mBC@active.ident))))
+cluster_name=idents
+cl = parallel::makeCluster(threads, type="PSOCK", useXDR=FALSE)
+doParallel::registerDoParallel(cl)
+doRNG::registerDoRNG(42)
+res = foreach (j = 1:length(unique(mBC@active.ident)),
+               .packages=c("ggplot2", "clusterProfiler", "grDevices", "graphics", "enrichplot",
+                           "RColorBrewer", "org.Hs.eg.db", "org.Mm.eg.db", "org.Rn.eg.db"),
+               .noexport=setdiff(ls(),
+                                 c("geneList", "dir.name.GO","species","cluster_name",
+                                   "GO_enrich_analysis")),
+               .options.RNG=42
+) %dopar% {
+  GO_enrich_analysis(geneList=geneList,
+                     species=species,
+                     keyNumber=j,
+                     cluster_name = cluster_name,
+                     out.plot.dir=dir.name.GO)
+}
+parallel::stopCluster(cl)
+
+quiet(gc())
+
+res1 = NULL
+for (j in 1:length(res)){
+  if(!is.na(res[[j]][[1]])){
+  res1 = rbind(res1, res[[j]][[1]])
+  }
+}
+res1 = as.data.frame(res1)
+res1 = res1[,c(1,2,5:10)]
+
+GO_results = res
+
+file.name=paste(dir.name.GO, "GO_enrichment_ALLmarkers.txt", sep='')
+if(!is.null(res1)){
+fwrite(res1, file = file.name,
+       sep="\t", quote=F, row.names=F, col.names=T)
+}
+
+GO_output_table = res1
+
+#filtered out cluster numbers
+
+tmp_key = NULL
+for(i in c(1:length(unique(mBC@active.ident)))){
+  if(is.na(GO_results[[i]][[2]])){
+    tmp = FALSE
+  } else {
+    tmp =TRUE
+  }
+  tmp_key = c(tmp_key, tmp)
+}
+tmp = !tmp_key
+tmp_key = levels(mBC@active.ident)[tmp_key]
+tmp_key = paste0("cluster", tmp_key)
+
+tmp_msg = "Significantly-enriched GO terms were not identified"
+
+```
+
+Figure 10. Visualization of Gene Ontology enrichment analysis against identified marker genes of each cluster.  
+
+
+```{r GO_plotting, echo=FALSE, cache=FALSE}
+out <- NULL
+
+for (i in c(1:length(unique(mBC@active.ident)))) {
+  if(tmp[i]){
+  tabName <- paste0("cluster",clusters[i])
+  tabSection <- paste0(
+    "\n### ", tabName, "\n",
+    "\n\n```{r, ", "GO", i, ", echo=FALSE, cache=FALSE, fig.width=4, fig.height=4, dpi=300, out.width = 400, out.height = 400, fig.align='center'}\n",
+    "paste(tmp_msg)\n",
+    "\n\n```\n\n"
+  )
+  } else {
+     tabName <- paste0("cluster",clusters[i])
+  tabSection <- paste0(
+    "\n### ", tabName, "\n",
+    "\n\n```{r, ", "GO", i, ", echo=FALSE, cache=FALSE, fig.width=10, fig.height=8, dpi=300, out.width = 700, out.height = 600, fig.align='center'}\n",
+    "plot_grid(GO_results[[", i, "]][[2]])\n",
+    "\n\n```\n\n"
+  ) 
+  }
+
+  out <- c(out, knit_expand(text=tabSection))
+}
+
+```
+
+`r paste(knit(text = out), collapse = '\n')`
+
+---
+
+## Gene Ontology analysis results (table view) 
+
+`r if(!is.null(GO_output_table)){paste("GO analysis result table.  ")}`
+
+`r if(!is.null(GO_output_table)){paste("ID : Gene ontology term ID  ")}`
+`r if(!is.null(GO_output_table)){paste("Description : Gene ontology term name  ")}`
+`r if(!is.null(GO_output_table)){paste("pvalue : term enrichment p value  ")}`
+`r if(!is.null(GO_output_table)){paste("p.adjust : Benjamini-Hochberg corrected p value  ")}`
+`r if(!is.null(GO_output_table)){paste("qvalue : False discovery rate  ")}`
+`r if(!is.null(GO_output_table)){paste("GeneID : marker genes associated with each enriched GO term.  ")}`    
+`r if(!is.null(GO_output_table)){paste("count : the number of marker genes associated with each enriched GO term.  ")}`
+`r if(!is.null(GO_output_table)){paste("cluster : Seurat cluster number  ")}`
+
+`r if(!is.null(GO_output_table)){paste("Table 4. All of the enriched GO terms of each marker gene of each cluster.  ")}`
+
+`r if(is.null(GO_output_table)){paste("Significantly-enriched GO term was not identified based on the analysis settings")}`  
+
+```{r output_table5, echo=FALSE, cache=FALSE, dpi=300, out.width = 1000, out.height = 700, fig.align='center', eval=!is.null(GO_output_table)}
+DT::datatable(GO_output_table, filter="none", rownames = F, width='100%',
+          class = 'cell-border stripe', extensions ='FixedColumns',
+          options = list(pageLength=15, fixedColumns = list(leftColumns = 2))) %>%
+   DT::formatStyle(columns = c(1:ncol(mBC.markers)), fontSize = 8)
+```
+
+`r if(!is.null(GO_output_table)){paste("GO analysis result files were stored at ", dir.name.GO, sep="")}`  
+
+---
+
+`r if(Singler){paste("## Cell type estimation by SingleR package")}`
+
+```{r Seurat_singleR1, echo=FALSE, cache=FALSE,warning=FALSE, eval = Singler}
+database_name=if(species == "mmu"){paste("Immgen datasets")} else if (species == "hsa"){paste("Blueprint/ENCODE datasets")}
+```
+
+`r if(Singler){paste("We finally estimate cell type of each cluster by using SingleR package (Aran D et al Nat Immunol 2019) in ", "version$version.string", sep="")}`   
+`r if(Singler){paste("We used ", database_name, " for cell type estimation.", sep="")}`  
+`r if(Singler){paste("**CAUTION: This result is a rough guide for cell type assignment of each identified cluster. Users must curate each cell cluster manually by confirming marker genes of each Seurat cell cluster.**")}`    
+
+```{r Seurat_singleR, echo=FALSE, cache=FALSE,warning=FALSE, eval = Singler}
+
+message("Perform singleR cell type estimation...")
+setwd("../") #must set working directory. default is .Rmd-existing path.
+
+
+if(species == "mmu"){
+load("./reference/singleR_ref/immgenDB_SingleR.rda")
+
+## singleR analysis
+singler_res = suppressWarnings(SingleR::SingleR(
+  test = GetAssayData(mBC, assay = 'RNA', slot = 'data'),
+  ref = immgen.tc,
+  labels = immgen.tc@colData@listData$label.manual)
+)
+
+} else if (species == "hsa"){
+load("./reference/singleR_ref/Blueprint.rda") 
+  singler_res = suppressWarnings(SingleR::SingleR(
+  test = GetAssayData(mBC, assay = 'RNA', slot = 'data'),
+  ref = hoge,
+  labels = hoge@colData@listData$label.fine)
+)
+} else if(species == "rat"){
+load("./reference/singleR_ref/immgenDB_SingleR.rda")
+
+## singleR analysis
+singler_res = suppressWarnings(SingleR::SingleR(
+  test = GetAssayData(mBC, assay = 'RNA', slot = 'data'),
+  ref = immgen.tc,
+  labels = immgen.tc@colData@listData$label.manual)
+)
+}
+
+
+#specify cluster colors
+if (mBC@version == "2.3.4"){
+cluster_colors = custom_colors$discrete[1:length(unique(mBC@ident))]
+names(cluster_colors) = 0:(length(unique(mBC@ident))-1)
+} else if (mBC@version >= "3.0"){
+  cluster_colors = custom_colors$discrete[1:length(unique(mBC@active.ident))]
+names(cluster_colors) = 0:(length(unique(mBC@active.ident))-1)
+}
+annotation_colors = list(
+  Seurat_clusters=cluster_colors
+)
+
+if (mBC@version == "2.3.4"){
+p_score = plotScoreHeatmap(
+  singler_res,
+  show.labels = TRUE,
+  annotation_col = data.frame(
+    Seurat_clusters = mBC@ident,
+    row.names = rownames(singler_res)),
+  annotation_colors=annotation_colors, silent=TRUE, 
+  annotation_legend=FALSE
+  )
+
+} else if (mBC@version >= "3.0"){
+p_score = plotScoreHeatmap(
+  singler_res,
+  show.labels = TRUE,
+  annotation_col = data.frame(
+    Seurat_clusters = mBC@active.ident,
+    row.names = rownames(singler_res)),
+  annotation_colors=annotation_colors, silent=TRUE, 
+  annotation_legend=FALSE
+  )
+}
+
+p_score = as.ggplot(p_score[[4]])
+
+file.name_p_score=paste(dir.name.plot1, sample_name, "_SingleR_score.png", sep='')
+ggsave(file = file.name_p_score, plot = p_score, 
+       device="png", units="in", dpi = 300,
+       width = 14, height = 11, limitsize=FALSE)
+
+#add SingleR-estimated celltype to Seurat metadata
+singler_res = as.data.frame(singler_res)
+cellType = singler_res$labels
+names(cellType) = rownames(singler_res)
+mBC = AddMetaData(mBC, cellType, col.name = "cellType_SingleR_estimated")
+
+if (mBC@version == "2.3.4"){
+  seu_cluster = as.character(mBC@ident)
+} else if (mBC@version >= "3.0"){
+seu_cluster = as.character(mBC@active.ident)
+}
+
+names(seu_cluster) = rownames(mBC@meta.data)
+mBC = AddMetaData(mBC, seu_cluster, col.name = "Seurat_clusters")
+
+#Draw cell type - seurat cluster relationships
+if (mBC@version == "2.3.4"){
+temp_labels <- as.data.frame(table(mBC@ident))
+} else if (mBC@version >= "3.0"){
+temp_labels <- as.data.frame(table(mBC@active.ident))
+}
+
+colnames(temp_labels)[1:2]=c("Seurat_clusters", "Sample")
+
+table_clusters_by_cell_type <- mBC@meta.data %>%
+  dplyr::group_by(Seurat_clusters, cellType_SingleR_estimated) %>%
+  dplyr::summarize(count = n()) %>%
+  tidyr::spread(cellType_SingleR_estimated, count, fill = 0) %>%
+  dplyr::ungroup() %>%
+  dplyr::mutate(total_cell_count = rowSums(.[c(2:ncol(.))])) %>%
+  dplyr::select(c("Seurat_clusters", "total_cell_count", dplyr::everything())) 
+
+table_clusters_by_cell_type = as.data.frame(table_clusters_by_cell_type)
+table_clusters_by_cell_type = table_clusters_by_cell_type[,c(1,3:ncol(table_clusters_by_cell_type))]
+
+if (mBC@version == "2.3.4"){
+table_clusters_by_cell_type = table_clusters_by_cell_type %>%
+  reshape2::melt(id.vars = "Seurat_clusters") %>%
+  mutate(Seurat_clusters = factor(Seurat_clusters, levels = levels(mBC@ident)))
+} else if (mBC@version >= "3.0"){
+  table_clusters_by_cell_type = table_clusters_by_cell_type %>%
+  reshape2::melt(id.vars = "Seurat_clusters") %>%
+  mutate(Seurat_clusters = factor(Seurat_clusters, levels = levels(mBC@active.ident)))
+}
+
+p_compositon_singleR = table_clusters_by_cell_type %>% ggplot(aes(Seurat_clusters, value)) +
+  geom_bar(aes(fill = variable), position = 'fill', stat = 'identity') +
+  scale_fill_manual(name = 'Cell type', values = custom_colors$discrete) +
+  scale_y_continuous(
+    name = '% of total cells within cluster',
+    labels = scales::percent_format(),
+    expand = c(0.01,0)
+  ) +
+  coord_cartesian(clip = 'off') +
+  theme_bw() +
+  theme(
+    legend.position = 'right',
+    plot.title = element_text(hjust = 0.5),
+    text = element_text(size = 12),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
+    plot.margin = margin(t = 20, r = 0, b = 0, l = 10, unit = 'pt')
+  )
+
+file.name_p_compositon_singleR=paste(dir.name.plot1, sample_name, "_SingleR_composition.png", sep='')
+ggsave(file = file.name_p_compositon_singleR, plot = p_compositon_singleR, 
+       device="png", units="in", dpi = 300,
+       width = 14, height = 8, limitsize=FALSE)
+
+### individual FIt-SNE plot by estimated cell types
+temp_labels <- mBC@meta.data %>%
+  group_by(cellType_SingleR_estimated) %>%
+  tally()
+
+
+if (mBC@version == "2.3.4"){
+p_discrete = bind_cols(mBC@meta.data, as.data.frame(mBC@dr$FItSNE@cell.embeddings)) %>%
+  ggplot(aes(FItSNE_1, FItSNE_2, color = cellType_SingleR_estimated)) +
+  geom_point(size = 0.2, show.legend = FALSE) +
+  geom_text(
+    data = temp_labels,
+    aes(x = Inf, y = -Inf,
+      label = paste0('n = ', format(n, big.mark = ',', trim = TRUE)),
+      vjust = -1.5, hjust = 1.25),
+    color = 'black', size = 2.8) +
+  theme_bw() +
+  scale_color_manual(values = custom_colors$discrete) +
+  labs(color = 'Cell type') +
+  guides(colour = guide_legend(override.aes = list(size = 2))) +
+  coord_fixed() +
+  facet_wrap(~cellType_SingleR_estimated, ncol = 4) +
+  theme(legend.position = 'right',
+    strip.text = element_text(face = 'bold', size = 8)
+  )
+} else if (mBC@version >= "3.0"){
+p_discrete = bind_cols(mBC@meta.data, as.data.frame(Embeddings(mBC@reductions$FItSNE))) %>%
+  ggplot(aes(FItSNE_1, FItSNE_2, color = cellType_SingleR_estimated)) +
+  geom_point(size = 0.2, show.legend = FALSE) +
+  geom_text(
+    data = temp_labels,
+    aes(x = Inf, y = -Inf,
+      label = paste0('n = ', format(n, big.mark = ',', trim = TRUE)),
+      vjust = -1.5, hjust = 1.25),
+    color = 'black', size = 2.8) +
+  theme_bw() +
+  scale_color_manual(values = custom_colors$discrete) +
+  labs(color = 'Cell type') +
+  guides(colour = guide_legend(override.aes = list(size = 2))) +
+  coord_fixed() +
+  facet_wrap(~cellType_SingleR_estimated, ncol = 6) +
+  theme(legend.position = 'right',
+    strip.text = element_text(face = 'bold', size = 8)
+  )
+}
+
+
+file.name_p_discrete=paste(dir.name.plot1, sample_name, "_SingleR_discrete.png", sep='')
+ggsave(file = file.name_p_discrete, 
+       plot = plot_grid(plot_grid(plotlist=highlighted_plot, ncol = 2), p_discrete, ncol=2), 
+       device="png", units="in", dpi = 300,
+       width = 16, height = 12, limitsize=FALSE)
+
+
+```
+
+`r if(Singler){paste("Figure 10. Heatmap visualization of cell type estimation scores of each cell")}`
+
+
+```{r Seurat_singleR_score_heatmap, echo=FALSE, cache=FALSE, fig.width=8, fig.height=8, dpi=300, out.width = 800, out.height = 800, fig.align='center', eval=Singler}
+plot_grid(p_score)
+quiet(dev.off())
+
+```
+
+`r if(Singler){paste("Figure 11. Composition of clusters by percent of SingleR-estimated cell types.")}` 
+
+```{r Seurat_singleR_composition, echo=FALSE, cache=FALSE, fig.width=8, fig.height=8, dpi=300, out.width = 800, out.height = 800, fig.align='center', eval=Singler}
+plot_grid(p_compositon_singleR)
+quiet(dev.off())
+```
+
+`r if(Singler){paste("To understand whether cell types overlap in the FIt-SNE, we also plot the same and split the panels by SingleR-estimated cell type.")}`
+
+`r if(Singler){paste("Figure 11. Discrete mapping by SingleR-estimated cell types. ")}`
+
+```{r Seurat_singleR_discrete, echo=FALSE, cache=FALSE, fig.width=10, fig.height=16, dpi=300, out.width = 1000, out.height = 1600, fig.align='center', eval=Singler}
+plot_grid(p_discrete)
+quiet(dev.off())
+```
+
+`r if(Singler){paste("Output file locations")}`
+
+`r if(Singler){paste("SingleR score heatmap was stored at")}` `r if(Singler){paste(file.name_p_score, sep="")}`  
+`r if(Singler){paste("cell composition plot was stored at")}` `r if(Singler){paste(file.name_p_compositon_singleR, sep="")}`  
+`r if(Singler){paste("cell type discrete plot was stored at")}` `r if(Singler){paste(file.name_p_discrete, ".", sep="")}`  
+
+---
+
+## SessionInfo
+
+
+```{r sessioninfo, results.folding="hide", summary.results="SessionInfo"}  
+options(max.print = 999999)
+sessionInfo()
+```
+
+
+---
