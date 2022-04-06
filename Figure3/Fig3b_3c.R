@@ -9,20 +9,12 @@ library(rstatix)
 library(dplyr)
 library(cowplot)
 
-system("wget -L -O matrix_inflection_10Xv2-LungP7-8.txt.gz 
-       https://tus.box.com/shared/static/61wvgbvgirdz3ej3vy7pm3dmnh5xmwi2.gz")
-system("wget -L -O matrix_inflection_10Xv2-LungP7-9.txt.gz
-https://tus.box.com/shared/static/xlwflls1qhup7hzis74kvp2oz6nhpeyq.gz")
-
-system("wget -L -O matrix_inflection_lung_SmartSeq2.txt.gz 
-       https://tus.box.com/shared/static/bsn7pbqy93oh9t2xgx6b7k8y7ibbdz6y.gz")
-
-system("wget -L -O matrix_inflection_TASSeq.deep-1.txt.gz 
-       https://tus.box.com/shared/static/gft7tuo3nlyf01ce41uj5kjokkrmig9v.gz")
-system("wget -L -O matrix_inflection_TASSeq.deep-2.txt.gz
-https://tus.box.com/shared/static/gcqjlcksnr0bdppvvoa2ou5qars971sx.gz")
-system("wget -L -O matrix_inflection_TASSeq.deep-3.txt.gz
-https://tus.box.com/shared/static/m3n6lnouqjw7qcfjwv0aelpx5x2qihea.gz")
+system("wget -L -O matrix_inflection_10Xv2-LungP7-8.txt.gz https://tus.box.com/shared/static/61wvgbvgirdz3ej3vy7pm3dmnh5xmwi2.gz")
+system("wget -L -O matrix_inflection_10Xv2-LungP7-9.txt.gz https://tus.box.com/shared/static/xlwflls1qhup7hzis74kvp2oz6nhpeyq.gz")
+system("wget -L -O matrix_inflection_lung_SmartSeq2.txt.gz https://tus.box.com/shared/static/bsn7pbqy93oh9t2xgx6b7k8y7ibbdz6y.gz")
+system("wget -L -O matrix_inflection_TASSeq.deep-1.txt.gz https://tus.box.com/shared/static/gft7tuo3nlyf01ce41uj5kjokkrmig9v.gz")
+system("wget -L -O matrix_inflection_TASSeq.deep-2.txt.gz https://tus.box.com/shared/static/gcqjlcksnr0bdppvvoa2ou5qars971sx.gz")
+system("wget -L -O matrix_inflection_TASSeq.deep-3.txt.gz https://tus.box.com/shared/static/m3n6lnouqjw7qcfjwv0aelpx5x2qihea.gz")
 
 fnames = dir(pattern = "matrix_inflection")
 tablelist = lapply(fnames, tableread_fast_sparse)
