@@ -8,13 +8,11 @@ library(Seurat)
 library(rstatix)
 library(dplyr)
 library(cowplot)
-system("wget -L -O matrix_inflection_10Xv2-GSM3926540.txt.gz
-       https://tus.box.com/shared/static/wf4whgfdj2bx0kpbe05r66ntq1p7zltl.gz")
+
+system("wget -L -O matrix_inflection_10Xv2-GSM3926540.txt.gz https://tus.box.com/shared/static/wf4whgfdj2bx0kpbe05r66ntq1p7zltl.gz")
 system("wget -L -O matrix_inflection_TASSeq.shallow-1.txt.gz https://tus.box.com/shared/static/syhnu7ppwh68k3qq7dj1dsul9pylrujp.gz")
-system("wget -L -O matrix_inflection_TASSeq.shallow-2.txt.gz
-https://tus.box.com/shared/static/70pb65l3wnyaqhp57kissp2kjjv8eax0.gz")
-system("wget -L -O matrix_inflection_TASSeq.shallow-3.txt.gz
-https://tus.box.com/shared/static/sjchyfwou73jks35lwljr34t2mwax887.gz")
+system("wget -L -O matrix_inflection_TASSeq.shallow-2.txt.gz https://tus.box.com/shared/static/70pb65l3wnyaqhp57kissp2kjjv8eax0.gz")
+system("wget -L -O matrix_inflection_TASSeq.shallow-3.txt.gz https://tus.box.com/shared/static/sjchyfwou73jks35lwljr34t2mwax887.gz")
 
 
 fnames = dir(pattern = "matrix_inflection")
