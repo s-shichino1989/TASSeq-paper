@@ -9,14 +9,10 @@ library(dplyr)
 library(cowplot)
 
 ##download annotated Seurat objects for mouse lung data
-system("wget -L -O matrix_inflection_MouseSpleen1_deep.txt.gz
-       https://tus.box.com/shared/static/d4b73innhjxa78tp6xwlgusehtuq3upi.gz")
-system("wget -L -O matrix_inflection_MouseSpleen2_deep.txt.gz
-       https://tus.box.com/shared/static/aah2fg88xex5y2sfmxtfwys8x9hqlhq0.gz")
-system("wget -L -O matrix_inflection_MouseSpleen3_deep.txt.gz
-       https://tus.box.com/shared/static/vltu1q6356ubwq27k64k31xczt9lblzf.gz")
-system("wget -L -O matrix_inflection_SpleenSmartSeq2.txt.gz
-       https://tus.box.com/shared/statzic/i25lv5ujxk3hmp38gvdvuj3cnwe30drw.gz")
+system("wget -L -O matrix_inflection_MouseSpleen1_deep.txt.gz https://tus.box.com/shared/static/d4b73innhjxa78tp6xwlgusehtuq3upi.gz")
+system("wget -L -O matrix_inflection_MouseSpleen2_deep.txt.gz https://tus.box.com/shared/static/aah2fg88xex5y2sfmxtfwys8x9hqlhq0.gz")
+system("wget -L -O matrix_inflection_MouseSpleen3_deep.txt.gz https://tus.box.com/shared/static/vltu1q6356ubwq27k64k31xczt9lblzf.gz")
+system("wget -L -O matrix_inflection_SpleenSmartSeq2.txt.gz https://tus.box.com/shared/statzic/i25lv5ujxk3hmp38gvdvuj3cnwe30drw.gz")
 
 
 fnames = dir(pattern = "matrix_")
