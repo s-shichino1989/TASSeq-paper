@@ -8,17 +8,11 @@ library(rstatix)
 library(dplyr)
 library(cowplot)
 
-system("wget -L -O matrix_inflection_MouseSpleen1_shallow.txt.gz
-       https://tus.box.com/shared/static/48djqp27ugvj9xpys82qo1o8mu0kkc3c.gz")
-system("wget -L -O matrix_inflection_MouseSpleen2_shallow.txt.gz
-       https://tus.box.com/shared/static/bgvuiimlypw69h8qaqfd72p5v6jmddyq.gz")
-system("wget -L -O matrix_inflection_MouseSpleen3_shallow.txt.gz
-       https://tus.box.com/shared/static/ni2rz4raoxy5ldtd5jm313urxym2fvkn.gz")
-system("wget -L -O matrix_inflection_SpleenP7-6.txt.gz
-       https://tus.box.com/shared/static/ql6lozl2at0pjdi9ej1j5crk6hpy9qm1.gz")
-
-system("wget -L -O matrix_inflection_SpleenP4-7.txt.gz
-       https://tus.box.com/shared/static/8mqrd6flp3hh78t9es412on82hvdf8kj.gz")
+system("wget -L -O matrix_inflection_MouseSpleen1_shallow.txt.gz https://tus.box.com/shared/static/48djqp27ugvj9xpys82qo1o8mu0kkc3c.gz")
+system("wget -L -O matrix_inflection_MouseSpleen2_shallow.txt.gz https://tus.box.com/shared/static/bgvuiimlypw69h8qaqfd72p5v6jmddyq.gz")
+system("wget -L -O matrix_inflection_MouseSpleen3_shallow.txt.gz https://tus.box.com/shared/static/ni2rz4raoxy5ldtd5jm313urxym2fvkn.gz")
+system("wget -L -O matrix_inflection_SpleenP7-6.txt.gz https://tus.box.com/shared/static/ql6lozl2at0pjdi9ej1j5crk6hpy9qm1.gz")
+system("wget -L -O matrix_inflection_SpleenP4-7.txt.gz https://tus.box.com/shared/static/8mqrd6flp3hh78t9es412on82hvdf8kj.gz")
 
 
 fnames = dir(pattern = "matrix_")
