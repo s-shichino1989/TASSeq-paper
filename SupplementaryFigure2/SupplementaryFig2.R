@@ -8,19 +8,13 @@ library(rstatix)
 library(dplyr)
 library(cowplot)
 
-system("wget -L -O matrix_inflection_MouseSpleen1_TASSeq_vsBD.txt.gz
-       https://tus.box.com/shared/static/2zb7m4xfwfbqyiukuatfohasdd8973d3.gz")
-system("wget -L -O matrix_inflection_MouseSpleen2_TASSeq_vsBD.txt.gz
-       https://tus.box.com/shared/static/snk0yfummjssdoezbtkz2dqqr0lkizbp.gz")
-system("wget -L -O matrix_inflection_MouseSpleen3_TASSeq_vsBD.txt.gz
-      https://tus.box.com/shared/static/9p83zzxttwtqysbbb0ko094txt4hrt39.gz")
+system("wget -L -O matrix_inflection_MouseSpleen1_TASSeq_vsBD.txt.gz https://tus.box.com/shared/static/2zb7m4xfwfbqyiukuatfohasdd8973d3.gz")
+system("wget -L -O matrix_inflection_MouseSpleen2_TASSeq_vsBD.txt.gz https://tus.box.com/shared/static/snk0yfummjssdoezbtkz2dqqr0lkizbp.gz")
+system("wget -L -O matrix_inflection_MouseSpleen3_TASSeq_vsBD.txt.gz https://tus.box.com/shared/static/9p83zzxttwtqysbbb0ko094txt4hrt39.gz")
 
-system("wget -L -O matrix_inflection_MouseSpleenBD1.txt.gz
-       https://tus.box.com/shared/static/mgcgagqtdgtz6lky2r302wyqin5abity.gz")
-system("wget -L -O matrix_inflection_MouseSpleenBD2.txt.gz
-       https://tus.box.com/shared/static/35tvo2denbunnb0t8oviz8emvvrs3jas.gz")
-system("wget -L -O matrix_inflection_MouseSpleenBD3.txt.gz
-       https://tus.box.com/shared/static/dw6y65e9pig50qpcplzi8k5hp4jke27z.gz")
+system("wget -L -O matrix_inflection_MouseSpleenBD1.txt.gz https://tus.box.com/shared/static/mgcgagqtdgtz6lky2r302wyqin5abity.gz")
+system("wget -L -O matrix_inflection_MouseSpleenBD2.txt.gz https://tus.box.com/shared/static/35tvo2denbunnb0t8oviz8emvvrs3jas.gz")
+system("wget -L -O matrix_inflection_MouseSpleenBD3.txt.gz https://tus.box.com/shared/static/dw6y65e9pig50qpcplzi8k5hp4jke27z.gz")
 
 fnames = dir(pattern = "matrix_")
 tablelist = lapply(fnames, tableread_fast_sparse)
