@@ -12,9 +12,7 @@ sample.name="test"
 
 
 ##download annotated Seurat objects for mouse lung data
-system("wget -L -O matrix_inflection_10Xv2-GSM3926540.txt.gz https://tus.box.com/shared/static/wf4whgfdj2bx0kpbe05r66ntq1p7zltl.gz")
 system("wget -L -O UTlung_deep_Seurat_annot.qs https://tus.box.com/shared/static/ohoohhgf3t12tcmupueajbbapu4xdxm6.qs")
-system("wget -L -O UTlung_shallow_Seurat_annot.qs https://tus.box.com/shared/static/rhlcprxv2l3mtmulphsotwl2serl6u7o.qs")
 system("wget -L -O UTlung_SmartSeq2_Seurat_annot.qs https://tus.box.com/shared/static/ej8tff4k7szdfqsw6niljnzrronnx910.qs")
 system("wget -L -O UTlung_10Xv2_TabulaMuris_Seurat_annot.qs https://tus.box.com/shared/static/fqiabrfwxd7y15jgcwlovelhoz2tgz65.qs")
 
@@ -27,20 +25,20 @@ fnames = dir(pattern="UTlung_")
 seu_list = lapply(fnames, qread, nthreads=24)
 
 #rename Smart-seq2 orig.ident
-seu_list[[5]]@meta.data$orig.ident = rep("Smart-seq2", nrow(seu_list[[5]]@meta.data))
+seu_list[[3]]@meta.data$orig.ident = rep("Smart-seq2", nrow(seu_list[[5]]@meta.data))
 
 #rename 10X v2 Tabula Muris data
-seu_list[[2]]@meta.data$orig.ident = rep("10Xv2_TabulaMuris", nrow(seu_list[[2]]@meta.data))
+seu_list[[1]]@meta.data$orig.ident = rep("10Xv2_TabulaMuris", nrow(seu_list[[2]]@meta.data))
 
 
 #remove doublets
-for(i in c(1:5)){
+for(i in c(1:3)){
   doublet_key = seu_list[[i]]@meta.data$celltype %in% c("doublet", "misc")
   seu_list[[i]]=subset(seu_list[[i]], cells = rownames(seu_list[[i]]@meta.data[!doublet_key,]))
 }
 
 #merge data
-for(i in c(1:5)){
+for(i in c(1:3)){
   if(i>1){
     seu = merge(x=seu, y=seu_list[[i]])
   } else {
@@ -48,10 +46,10 @@ for(i in c(1:5)){
   }
 }
 
-idents = c("10Xv2-GSM3926540", "10Xv2-TabulaMuris","TAS-Seq.deep", "TAS-Seq.shallow", "Smart-seq2")
+idents = c("10Xv2-TabulaMuris","TAS-Seq.deep", "Smart-seq2")
 
 #plot interleukin genes
-for(i in c(1:5)){
+for(i in c(1:3)){
 interleukins = grep(pattern="Il[1-9].*", x = rownames(seu_list[[i]]@assays$RNA@counts), value=TRUE)
 interleukins = interleukins[!interleukins %in% c(grep(pattern="r", x = interleukins, value=TRUE), "IL18bp", "Il1bos", "Il4i1", "Il6st")]
 interleukins=sort(interleukins)
@@ -69,7 +67,7 @@ ggsave(filename=paste0(idents[i], "_IL_dotplot.png"), plot = p, device = "png", 
 }
 
 
-#plot growth factor genes
+#extract growth factor genes
 data2 = rownames(seu@assays$RNA@counts)
 res = select(org.Mm.eg.db, keys = data2, keytype = "SYMBOL",columns = c("SYMBOL", "GOALL"))
 data3 = res[res$ONTOLOGYALL %in% "MF",]
@@ -87,7 +85,7 @@ annotation_res = annotation_res[!annotation_res %in% interleukins]
 annotation_res = sort(annotation_res)
 
 #plot GF genes
-for(i in c(1:5)){
+for(i in c(1:3)){
   GF_genes = annotation_res[annotation_res %in% rownames(seu_list[[i]]@assays$RNA@counts)]
 
   p = DotPlot(seu_list[[i]], cols = c("grey", "red"), features=GF_genes, scale = FALSE, dot.min = 0.05,
