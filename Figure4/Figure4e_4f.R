@@ -5,8 +5,7 @@ library(rDBEC)
 library(qs)
 
 #download annotated RA-ILD data
-system("wget -L -O RAILD_combined_Seurat_annot.qs
-       https://tus.box.com/shared/static/g5nzbs6ch8yg7xa5qy2s3a8y8s8xw6m9.qs")
+system("wget -L -O RAILD_combined_Seurat_annot.qs https://tus.box.com/shared/static/g5nzbs6ch8yg7xa5qy2s3a8y8s8xw6m9.qs")
 
 mBC = qread("RAILD_combined_Seurat_annot.qs", nthreads = 16)
 
