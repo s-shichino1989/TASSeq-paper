@@ -13,18 +13,13 @@ library(tibble)
 library(qs)
 
 ##download annotated Seurat objects for mouse lung data
-system("wget -L -O UTlung_deep_Seurat_annot.qs
-       https://tus.box.com/shared/static/ohoohhgf3t12tcmupueajbbapu4xdxm6.qs")
-system("wget -L -O UTlung_shallow_Seurat_annot.qs
-       https://tus.box.com/shared/static/rhlcprxv2l3mtmulphsotwl2serl6u7o.qs")
-system("wget -L -O UTlung_SmartSeq2_Seurat_annot.qs
-       https://tus.box.com/shared/static/ej8tff4k7szdfqsw6niljnzrronnx910.qs")
-system("wget -L -O UTlung_10Xv2_TabulaMuris_Seurat_annot.qs
-       https://tus.box.com/shared/static/fqiabrfwxd7y15jgcwlovelhoz2tgz65.qs")
+system("wget -L -O UTlung_deep_Seurat_annot.qs https://tus.box.com/shared/static/ohoohhgf3t12tcmupueajbbapu4xdxm6.qs")
+system("wget -L -O UTlung_shallow_Seurat_annot.qs https://tus.box.com/shared/static/rhlcprxv2l3mtmulphsotwl2serl6u7o.qs")
+system("wget -L -O UTlung_SmartSeq2_Seurat_annot.qs https://tus.box.com/shared/static/ej8tff4k7szdfqsw6niljnzrronnx910.qs")
+system("wget -L -O UTlung_10Xv2_TabulaMuris_Seurat_annot.qs https://tus.box.com/shared/static/fqiabrfwxd7y15jgcwlovelhoz2tgz65.qs")
 
 ##download GSE110540 bulkl RNA-seq (3'SAGE-Seq) data
-system("wget -L -O SAGE_data.txt
-       https://tus.box.com/shared/static/zt0iy2eh4x1qxlwtn4gbff5ilsdehmwx.txt")
+system("wget -L -O SAGE_data.txt https://tus.box.com/shared/static/zt0iy2eh4x1qxlwtn4gbff5ilsdehmwx.txt")
 
 files = dir(pattern = ".qs")
 
