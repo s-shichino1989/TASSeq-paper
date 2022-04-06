@@ -4,12 +4,7 @@
 from __future__ import unicode_literals
 
 '''
-Module for Fast annotating and parse BAM file.
-
-@author: Lenore Pafford
-mlpafford@cellular-research.com
-@author: Shigeyuki Shichino
-s_shichino@rs.tus.ac.jp modified at 2020.05.01
+Module for convert 10X BAM file to raw gene-expression count data (non UMI compression)
 
 '''
 import argparse
