@@ -8,14 +8,10 @@ library(rstatix)
 library(dplyr)
 library(cowplot)
 
-system("wget -L -O matrix_inflection_KidneyP4-6.txt.gz
-       https://tus.box.com/shared/static/4tqkljpc3r23je591um5ar1vd0qoka00.gz")
-system("wget -L -O matrix_inflection_KidneyP7-5.txt.gz
-       https://tus.box.com/shared/static/9qqhylrlh729jrzqd2t913s9il8baedz.gz")
-system("wget -L -O matrix_inflection_KidneySmartSeq2.txt.gz
-       https://tus.box.com/shared/static/wyerzbbiqeh7x9m4g331cx6u2n4etogo.gz")
-system("wget -L -O matrix_inflection_KidneyTAS-Seq.txt.gz
-       https://tus.box.com/shared/static/5ud5uza486067u8447hvm4pnsxtjoi99.gz")
+system("wget -L -O matrix_inflection_KidneyP4-6.txt.gz https://tus.box.com/shared/static/4tqkljpc3r23je591um5ar1vd0qoka00.gz")
+system("wget -L -O matrix_inflection_KidneyP7-5.txt.gz https://tus.box.com/shared/static/9qqhylrlh729jrzqd2t913s9il8baedz.gz")
+system("wget -L -O matrix_inflection_KidneySmartSeq2.txt.gz https://tus.box.com/shared/static/wyerzbbiqeh7x9m4g331cx6u2n4etogo.gz")
+system("wget -L -O matrix_inflection_KidneyTAS-Seq.txt.gz https://tus.box.com/shared/static/5ud5uza486067u8447hvm4pnsxtjoi99.gz")
 
 fnames = dir(pattern = "matrix_")
 tablelist = lapply(fnames, tableread_fast_sparse)
