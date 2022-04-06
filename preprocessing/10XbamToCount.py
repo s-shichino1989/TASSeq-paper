@@ -5,6 +5,7 @@ from __future__ import unicode_literals
 
 '''
 Module for convert 10X BAM file to raw gene-expression count data (non UMI compression)
+require pysam 0.15.4
 
 '''
 import argparse
@@ -22,10 +23,10 @@ import csv
 
 def main():
 
-    des = 'Add to Sam, ' + _v.desc
+    des = 'BAM conversion, ' + _v.desc
     parser = argparse.ArgumentParser(description=des, add_help=True)
     
-    #only require annotated R1 and R2 files
+    #require cell barcode-annotated BAM
     parser.add_argument('--bam', action='store', dest='R2_bam', required=True,
                         help='10X output BAM file')
 
@@ -34,23 +35,19 @@ def main():
         sys.exit(1)
     args = parser.parse_args()
 
-    #start = time.strftime("%Y-%m-%d %H:%M:%S")
-    #print ("Start adding annotations to SAM: {}".format(start))
-
     # output and intermediate files
     R2_BAM = args.R2_bam
-    final_txt = "{}_Annotated_mapping_R2.txt.gz".format(os.path.basename(R2_BAM).split('_mapping_R2')[0])
+    final_txt = "{}_Annotated_mapping_BAM.txt.gz".format(os.path.basename(R2_BAM).split('_mapping_R2')[0])
 
-    addR1toSAM(R2_BAM, final_txt)
+    BAMconvert(R2_BAM, final_txt)
     
     #end = time.strftime("%Y-%m-%d %H:%M:%S")
-    #print ("Finished adding annotations to sam and reshaping: {}".format(end))
+    #print ("Finished reshaping: {}".format(end))
     return 0
 
-def addR1toSAM(R2_bam, final_txt):
-    """Add Annotations from experiment to the SAM read line it is associated with"""
+def BAMconvert(R2_bam, final_txt):
 
-    #print ("Adding R1 information to parsed BAM file...")
+    #print ("parsing BAM file...")
     fnew = gzip.open(final_txt, mode='wt', compresslevel=1)
     fbam = pysam.AlignmentFile(R2_bam, 'rb', threads=16)
     ra1 = csv.writer(fnew, delimiter='\t', lineterminator='\n')
