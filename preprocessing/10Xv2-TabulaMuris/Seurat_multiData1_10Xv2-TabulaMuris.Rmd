@@ -112,8 +112,7 @@ setwd(dir.name.matrix)
 #load demultiplexed tables and create merged Seurat object
 
 system("wget -L -O matrix_inflection_10Xv2-LungP7-8.txt.gz https://tus.box.com/shared/static/61wvgbvgirdz3ej3vy7pm3dmnh5xmwi2.gz")
-system("wget -L -O matrix_inflection_10Xv2-LungP7-9.txt.gz
-https://tus.box.com/shared/static/xlwflls1qhup7hzis74kvp2oz6nhpeyq.gz")
+system("wget -L -O matrix_inflection_10Xv2-LungP7-9.txt.gz https://tus.box.com/shared/static/xlwflls1qhup7hzis74kvp2oz6nhpeyq.gz")
 
 fnames = dir(pattern = "matrix_inflection")
 tablelist = lapply(fnames, tableread_fast_sparse)
