@@ -228,7 +228,7 @@ p = DotPlot2(seu_list[[i]], cols = c("grey", "red"), features=interleukins, scal
    ggtitle(idents[i])+
        theme(plot.title=element_text(hjust = 0.5),
           text=element_text(size=10),
-          axis.text.x = element_text(size=10, family="italic"))
+          axis.text.x = element_text(size=10, face="italic"))
 
 ggsave(filename=paste0(idents[i], "_IL_dotplot.png"), plot = p, device = "png", width = 7, height=8, units = "in", dpi = 300,
        limitsize = FALSE, bg = "white")
@@ -263,7 +263,7 @@ for(i in c(1:3)){
     ggtitle(idents[i])+
         theme(plot.title=element_text(hjust = 0.5),
           text=element_text(size=10),
-          axis.text.x = element_text(size=10, family="italic"))
+          axis.text.x = element_text(size=10, face="italic"))
 
   ggsave(filename=paste0(idents[i], "_GF_dotplot.png"), plot = p, device = "png", width = 9, height=8, units = "in", dpi = 300,
          limitsize = FALSE, bg = "white")
