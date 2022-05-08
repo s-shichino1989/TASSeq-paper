@@ -37,8 +37,7 @@ system("wget -L -O UTlung_deep_Seurat_annot.qs https://tus.box.com/shared/static
 system("wget -L -O UTlung_shallow_Seurat_annot.qs https://tus.box.com/shared/static/rhlcprxv2l3mtmulphsotwl2serl6u7o.qs")
 system("wget -L -O UTlung_SmartSeq2_Seurat_annot.qs https://tus.box.com/shared/static/ej8tff4k7szdfqsw6niljnzrronnx910.qs")
 system("wget -L -O UTlung_10Xv2_TabulaMuris_Seurat_annot.qs https://tus.box.com/shared/static/fqiabrfwxd7y15jgcwlovelhoz2tgz65.qs")
-
-
+system("wget -L -O UTlung_TASSeq_dataset2_Seurat_annot.qs https://tus.box.com/shared/static/01z7v1klgzp39cgexyde63lbxui08lru.qs")
 
 fnames = dir(pattern = ".qs")
 seu_list = lapply(fnames, qread, nthreads=24)
@@ -53,7 +52,8 @@ hoge1 = custom_colors$discrete[1:length(hoge)]
 names(hoge1)=hoge
 
 title = c("10Xv2-GSM3926540", "10Xv2-TabulaMuris", "TAS-Seq.deep",
-          "TAS-Seq.shallow", "Smart-seq2")
+          "TAS-Seq.shallow", "Smart-seq2", "TAS-Seq.dataset2")
+
 
 i=1
 p = DimPlot(object = seu_list[[i]], reduction = "FItSNE", label = TRUE, label.size=6,
@@ -106,10 +106,21 @@ ggsave(file=paste0(title[i], "_DimPlot.png"),
        device="png", units="in",
        dpi=600, width=6, height=6, limitsize = FALSE)
 
+i=6
+p = DimPlot(object = seu_list[[i]], reduction = "FItSNE", label = TRUE, label.size=6,
+            combine = FALSE, pt.size = 0.8, cols = hoge1, repel = TRUE)
+p = CombinePlots(p) +   theme_void() + theme(legend.position='none')
+
+ggsave(file=paste0(title[i], "_DimPlot.png"),
+       plot=p,
+       device="png", units="in",
+       dpi=600, width=6, height=6, limitsize = FALSE)
+
+
 ##################
 #plot figure 4b (stacking plot)
 #merge Seurat object
-for(i in c(1:5)){
+for(i in c(1:6)){
   if(i>1){
    seu = merge(x=seu, y=seu_list[[i]])
   } else {
@@ -126,7 +137,8 @@ colnames(tmp1)[1]="celltype"
 hoge = c("doublet", "misc")
 tmp1 = tmp1[,!colnames(tmp1) %in% hoge]
 
-tmp_cellcount = tmp1[,c(1:5, 9:11,6:8)]
+tmp_cellcount = tmp1[,c(1:4,6, 10:12,7:9, 5)]
+colnames(tmp_cellcount)[12]="TASSeq.dataset2"
 
 #cell composition analysis, calculate % of total
 rownames(tmp_cellcount)=tmp_cellcount[,1]
@@ -160,4 +172,4 @@ p_PercentOfTotal = tmp2 %>%
   )
 
 ggsave(file = "percentoftotal_comparison.png", plot = p_PercentOfTotal, device="png", units="in", dpi = 300,
-       width = 6.5, height = 6, limitsize=FALSE)
+       width = 7, height = 6, limitsize=FALSE)
