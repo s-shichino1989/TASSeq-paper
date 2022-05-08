@@ -24,7 +24,7 @@ DC_Metadata = mBC@meta.data
 #rename entire data
 
 mBC = qread("./Seurat/day00UT_results_Seurat.qs", nthreads=12)
-
+mBC = FindClusters(mBC, resolution=3.5, random.seed=42)
 new.ident = read.table("./TASSeq_dataset2_annot.txt", row.names=1, header = T, sep="\t", quote="")
 
 tmp = new.ident[,1]
