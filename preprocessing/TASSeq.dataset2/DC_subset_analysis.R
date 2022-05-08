@@ -8,6 +8,8 @@ quiet <- function(x) {
 
 
 mBC = qread("./Seurat/day00UT_results_Seurat.qs")
+mBC = FindClusters(mBC, resolution=3.5, random.seed=42)
+
 mBC1 = mBC
 
 #DC
