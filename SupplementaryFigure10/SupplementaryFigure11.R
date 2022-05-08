@@ -1,5 +1,5 @@
 ##genes-reads distribution of pseudo-bulk data 
-##Supplementary Figure 10
+##Supplementary Figure 11
 
 library(scales)
 library(rDBEC)
