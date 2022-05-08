@@ -1,7 +1,7 @@
 ---
 title: "Seurat analysis report of BD Rhapsody TAS-Seq WTA data"
 date: "`r Sys.Date()`"
-author: "ImmunoGeneTeqs Inc."
+author: "Shigeyuki Shichino"
 output:
   rmdformats::readthedown:
     highlight: kate
@@ -111,6 +111,8 @@ dir.create(dir.name.table)
 setwd(dir.name.matrix)
 
 #load demultiplexed tables and create merged Seurat object
+
+system("wget -L -O matrix_inflection_day00UT.txt.gz https://tus.box.com/shared/static/0q7cxhw2u97dfxutravbi1ljeqvsrz5y.gz")
 
 fnames = dir(pattern = "matrix_inflection")
 tablelist = lapply(fnames, tableread_fast_sparse)
