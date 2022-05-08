@@ -1,5 +1,5 @@
 
-#Draw supplementary Figure 7-9
+#Draw supplementary Figure 8-10
 
 library(scales)
 library(rDBEC)
