@@ -1,4 +1,4 @@
-#perform comparison of nGenes in each cell populations (for Supplementary Figure 6)
+#perform comparison of nGenes in each cell populations (for Supplementary Figure 7)
 library(Seurat)
 library(ggplot2)
 library(rstatix)
